@@ -24,7 +24,6 @@ import { format, addWeeks, addMonths, addYears } from 'date-fns';
 import { useFirestore, addDocumentNonBlocking } from '@/firebase';
 import { collection, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
 import type { InstrumentStatus, MaintenanceFrequency, InstrumentType } from '@/lib/types';
 import { Combobox } from '@/components/ui/combobox';
 import { useInstrumentTypes } from '@/hooks/use-instrument-types';
@@ -43,7 +42,6 @@ const formSchema = z.object({
     required_error: 'Schedule date is required.',
   }),
   frequency: z.string().min(1, 'Frequency is required.'),
-  imageId: z.string().optional(),
 });
 
 type AddInstrumentFormValues = z.infer<typeof formSchema>;
@@ -70,6 +68,18 @@ const getNextMaintenanceDate = (startDate: Date, frequency: MaintenanceFrequency
     }
 };
 
+const instrumentTypeToImageId: Record<string, string> = {
+    'Lab Balance': 'microscope', // Assumption, can be changed
+    'Scale': 'microscope', // Assumption
+    'pH Meter': 'pcr-machine', // Assumption
+    'Tap Density Tester': 'hplc-system', // Assumption
+    'UV-Vis Spectrophotometer': 'spectrometer',
+    'GC': 'hplc-system', // Assumption
+    'Spectrometer': 'spectrometer',
+    'default': 'centrifuge'
+};
+
+
 export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const firestore = useFirestore();
@@ -86,7 +96,6 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
       location: '',
       status: 'Operational',
       frequency: '',
-      imageId: 'spectrometer', // Default image
     },
   });
 
@@ -95,6 +104,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
     setIsLoading(true);
 
     const nextMaintenanceDate = getNextMaintenanceDate(values.scheduleDate, values.frequency as MaintenanceFrequency);
+    const imageId = instrumentTypeToImageId[values.instrumentType] || instrumentTypeToImageId.default;
 
     const newInstrumentData = {
       ...values,
@@ -103,7 +113,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
       frequency: values.frequency as MaintenanceFrequency,
       scheduleDate: Timestamp.fromDate(values.scheduleDate),
       nextMaintenanceDate: Timestamp.fromDate(nextMaintenanceDate),
-      imageId: values.imageId || 'spectrometer',
+      imageId: imageId,
     };
 
     // Add new instrument type to the list if it's not already there
@@ -265,7 +275,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
                 )}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1">
                 <FormField
                     control={form.control}
                     name="frequency"
@@ -280,26 +290,6 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
                         </FormControl>
                         <SelectContent>
                             {frequencies.map(freq => <SelectItem key={freq} value={freq}>{freq}</SelectItem>)}
-                        </SelectContent>
-                        </Select>
-                        <FormMessage />
-                    </FormItem>
-                    )}
-                />
-                 <FormField
-                    control={form.control}
-                    name="imageId"
-                    render={({ field }) => (
-                    <FormItem>
-                        <FormLabel>Instrument Image</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                            <SelectTrigger>
-                            <SelectValue placeholder="Select an image" />
-                            </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                            {PlaceHolderImages.map(img => <SelectItem key={img.id} value={img.id}>{img.description}</SelectItem>)}
                         </SelectContent>
                         </Select>
                         <FormMessage />
