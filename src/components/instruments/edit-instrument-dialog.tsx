@@ -79,24 +79,15 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
 
   const form = useForm<EditInstrumentFormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      eqpId: instrument.eqpId,
-      instrumentType: instrument.instrumentType,
-      model: instrument.model,
-      serialNumber: instrument.serialNumber,
-      location: instrument.location,
-      status: instrument.status,
-      scheduleDate: instrument.scheduleDate.toDate(),
-      frequency: instrument.frequency,
-      imageId: instrument.imageId,
-    },
   });
   
   useEffect(() => {
-    form.reset({
-      ...instrument,
-      scheduleDate: instrument.scheduleDate.toDate(),
-    });
+    if (instrument) {
+      form.reset({
+        ...instrument,
+        scheduleDate: instrument.scheduleDate ? instrument.scheduleDate.toDate() : new Date(),
+      });
+    }
   }, [instrument, form]);
 
   const onSubmit = (values: EditInstrumentFormValues) => {
@@ -220,7 +211,7 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a status" />
@@ -274,7 +265,7 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
                     render={({ field }) => (
                     <FormItem>
                         <FormLabel>Maintenance Frequency</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                             <SelectTrigger>
                             <SelectValue placeholder="Select frequency" />
@@ -294,7 +285,7 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
                     render={({ field }) => (
                     <FormItem>
                         <FormLabel>Instrument Image</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                             <SelectTrigger>
                             <SelectValue placeholder="Select an image type" />
