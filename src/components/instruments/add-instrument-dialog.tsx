@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import Image from 'next/image';
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { CalendarIcon, Loader2 } from 'lucide-react';
+import { CalendarIcon, Loader2, FlaskConical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, addWeeks, addMonths, addYears } from 'date-fns';
 import { useFirestore, addDocumentNonBlocking } from '@/firebase';
@@ -27,6 +28,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { InstrumentStatus, MaintenanceFrequency, InstrumentType } from '@/lib/types';
 import { Combobox } from '@/components/ui/combobox';
 import { useInstrumentTypes } from '@/hooks/use-instrument-types';
+import { PlaceHolderImages } from '@/lib/placeholder-images';
 
 const frequencies: MaintenanceFrequency[] = ['Weekly', 'Monthly', '3 Months', '6 Months', '1 Year'];
 const statuses: InstrumentStatus[] = ['Operational', 'AMC', 'PM', 'Out of Service'];
@@ -69,12 +71,12 @@ const getNextMaintenanceDate = (startDate: Date, frequency: MaintenanceFrequency
 };
 
 const instrumentTypeToImageId: Record<string, string> = {
-    'Lab Balance': 'microscope', // Assumption, can be changed
-    'Scale': 'microscope', // Assumption
-    'pH Meter': 'pcr-machine', // Assumption
-    'Tap Density Tester': 'hplc-system', // Assumption
+    'Lab Balance': 'microscope',
+    'Scale': 'microscope',
+    'pH Meter': 'pcr-machine',
+    'Tap Density Tester': 'hplc-system',
     'UV-Vis Spectrophotometer': 'spectrometer',
-    'GC': 'hplc-system', // Assumption
+    'GC': 'hplc-system',
     'Spectrometer': 'spectrometer',
     'default': 'centrifuge'
 };
@@ -99,6 +101,13 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
     },
   });
 
+  const selectedInstrumentType = form.watch('instrumentType');
+  const previewImage = useMemo(() => {
+    if (!selectedInstrumentType) return null;
+    const imageId = instrumentTypeToImageId[selectedInstrumentType] || instrumentTypeToImageId.default;
+    return PlaceHolderImages.find(img => img.id === imageId) || null;
+  }, [selectedInstrumentType]);
+
   const onSubmit = (values: AddInstrumentFormValues) => {
     if (!firestore) return;
     setIsLoading(true);
@@ -116,8 +125,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
       imageId: imageId,
     };
 
-    // Add new instrument type to the list if it's not already there
-    if (!instrumentTypes.find(t => t.value === values.instrumentType)) {
+    if (!instrumentTypes.find(t => t.value.toLowerCase() === values.instrumentType.toLowerCase())) {
       addInstrumentType(values.instrumentType);
     }
 
@@ -141,163 +149,188 @@ export function AddInstrumentDialog({ isOpen, onOpenChange }: AddInstrumentDialo
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Add New Instrument</DialogTitle>
           <DialogDescription>Fill in the details below to add a new instrument to the inventory.</DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
-            <div className="grid grid-cols-2 gap-4">
-                <FormField
-                control={form.control}
-                name="eqpId"
-                render={({ field }) => (
-                    <FormItem>
-                    <FormLabel>Equipment ID</FormLabel>
-                    <FormControl>
-                        <Input placeholder="e.g., QC-001" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                    </FormItem>
-                )}
-                />
-                <FormField
-                    control={form.control}
-                    name="instrumentType"
-                    render={({ field }) => (
-                        <FormItem className="flex flex-col">
-                        <FormLabel>Instrument Type</FormLabel>
-                        <Combobox 
-                            options={instrumentTypes}
-                            value={field.value}
-                            onChange={field.onChange}
-                            placeholder="Select or type..."
-                            loading={isLoadingTypes}
-                        />
-                        <FormMessage />
-                        </FormItem>
-                    )}
-                />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-                <FormField
-                control={form.control}
-                name="model"
-                render={({ field }) => (
-                    <FormItem>
-                    <FormLabel>Model</FormLabel>
-                    <FormControl>
-                        <Input placeholder="Model-X100" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                    </FormItem>
-                )}
-                />
-                <FormField
-                control={form.control}
-                name="serialNumber"
-                render={({ field }) => (
-                    <FormItem>
-                    <FormLabel>Serial Number</FormLabel>
-                    <FormControl>
-                        <Input placeholder="SN-A1B2C3D4" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                    </FormItem>
-                )}
-                />
-            </div>
-            <FormField
+          <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
+            
+            {/* Form Fields Column */}
+            <div className="space-y-4">
+              <FormField
               control={form.control}
-              name="location"
+              name="eqpId"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Location</FormLabel>
+                  <FormItem>
+                  <FormLabel>Equipment ID</FormLabel>
                   <FormControl>
-                    <Input placeholder="Lab A, Room 101" {...field} />
+                      <Input placeholder="e.g., QC-001" {...field} />
                   </FormControl>
                   <FormMessage />
-                </FormItem>
+                  </FormItem>
               )}
-            />
-            <div className="grid grid-cols-2 gap-4">
+              />
+              <FormField
+                  control={form.control}
+                  name="instrumentType"
+                  render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                      <FormLabel>Instrument Type</FormLabel>
+                      <Combobox 
+                          options={instrumentTypes}
+                          value={field.value}
+                          onChange={field.onChange}
+                          placeholder="Select or type..."
+                          loading={isLoadingTypes}
+                      />
+                      <FormMessage />
+                      </FormItem>
+                  )}
+              />
+              <FormField
+              control={form.control}
+              name="model"
+              render={({ field }) => (
+                  <FormItem>
+                  <FormLabel>Model</FormLabel>
+                  <FormControl>
+                      <Input placeholder="Model-X100" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                  </FormItem>
+              )}
+              />
+              <FormField
+              control={form.control}
+              name="serialNumber"
+              render={({ field }) => (
+                  <FormItem>
+                  <FormLabel>Serial Number</FormLabel>
+                  <FormControl>
+                      <Input placeholder="SN-A1B2C3D4" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                  </FormItem>
+              )}
+              />
               <FormField
                 control={form.control}
-                name="status"
+                name="location"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                         {statuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Lab A, Room 101" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="scheduleDate"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Schedule Start Date</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={'outline'}
-                            className={cn('pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
-                          >
-                            {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) => date < new Date('1900-01-01')}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <div className="grid grid-cols-1">
+              <div className="grid grid-cols-2 gap-4">
                 <FormField
-                    control={form.control}
-                    name="frequency"
-                    render={({ field }) => (
+                  control={form.control}
+                  name="status"
+                  render={({ field }) => (
                     <FormItem>
-                        <FormLabel>Maintenance Frequency</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                            <SelectTrigger>
-                            <SelectValue placeholder="Select frequency" />
-                            </SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a status" />
+                          </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                            {frequencies.map(freq => <SelectItem key={freq} value={freq}>{freq}</SelectItem>)}
+                          {statuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
                         </SelectContent>
-                        </Select>
-                        <FormMessage />
+                      </Select>
+                      <FormMessage />
                     </FormItem>
-                    )}
+                  )}
                 />
+                <FormField
+                  control={form.control}
+                  name="scheduleDate"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Schedule Start Date</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={'outline'}
+                              className={cn('pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
+                            >
+                              {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={field.onChange}
+                            disabled={(date) => date < new Date('1900-01-01')}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                  control={form.control}
+                  name="frequency"
+                  render={({ field }) => (
+                  <FormItem>
+                      <FormLabel>Maintenance Frequency</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                          <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                          </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                          {frequencies.map(freq => <SelectItem key={freq} value={freq}>{freq}</SelectItem>)}
+                      </SelectContent>
+                      </Select>
+                      <FormMessage />
+                  </FormItem>
+                  )}
+              />
             </div>
-            <DialogFooter className="pt-4">
+            
+            {/* Image Preview Column */}
+            <div className="flex flex-col items-center justify-center space-y-4 p-4 border rounded-lg bg-muted/50 h-full">
+                <div className="w-full aspect-video rounded-md overflow-hidden bg-background">
+                    {previewImage ? (
+                        <Image
+                            src={previewImage.imageUrl}
+                            alt={previewImage.description}
+                            width={400}
+                            height={300}
+                            className="object-cover w-full h-full"
+                            data-ai-hint={previewImage.imageHint}
+                        />
+                    ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                            <FlaskConical className="h-16 w-16 mb-2" />
+                            <p>Image preview will appear here</p>
+                        </div>
+                    )}
+                </div>
+                <div className="text-center">
+                    <p className="font-semibold text-foreground">{selectedInstrumentType || 'Instrument Type'}</p>
+                    <p className="text-sm text-muted-foreground">Image associated with the selected type</p>
+                </div>
+            </div>
+
+            {/* Footer buttons need to span both columns if using grid */}
+            <DialogFooter className="pt-4 md:col-span-2">
               <Button variant="ghost" onClick={() => onOpenChange(false)} type="button">
                 Cancel
               </Button>
