@@ -10,7 +10,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
-  CommandList
+  CommandList,
 } from '@/components/ui/command';
 import {
   Popover,
@@ -33,6 +33,15 @@ interface ComboboxProps {
 
 export function Combobox({ options, value, onChange, placeholder, loading }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
+  const [inputValue, setInputValue] = React.useState('');
+
+  const allOptions = React.useMemo(() => {
+    const existingOption = options.find(option => option.value.toLowerCase() === inputValue.toLowerCase());
+    if (inputValue && !existingOption) {
+      return [...options, { value: inputValue, label: inputValue }];
+    }
+    return options;
+  }, [options, inputValue]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -44,35 +53,34 @@ export function Combobox({ options, value, onChange, placeholder, loading }: Com
           className="w-full justify-between font-normal"
         >
           {value
-            ? options.find((option) => option.value === value)?.label
+            ? allOptions.find((option) => option.value === value)?.label
             : placeholder || 'Select an option'}
           {loading ? <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin" /> : <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
         <Command
-            filter={(itemValue, search) => {
-                if (itemValue.toLowerCase().includes(search.toLowerCase())) return 1;
-                return 0;
-            }}
+          filter={(itemValue, search) => {
+            if (itemValue.toLowerCase().includes(search.toLowerCase())) return 1;
+            return 0;
+          }}
         >
           <CommandInput 
             placeholder={placeholder || "Search or type..."}
-            onValueChange={(search) => {
-                if (!options.some(opt => opt.value.toLowerCase() === search.toLowerCase())) {
-                    onChange(search);
-                }
-            }}
+            value={inputValue}
+            onValueChange={setInputValue}
           />
           <CommandList>
-            <CommandEmpty>No option found. Type to add.</CommandEmpty>
+            <CommandEmpty>No option found. Press Enter to add.</CommandEmpty>
             <CommandGroup>
-              {options.map((option) => (
+              {allOptions.map((option) => (
                 <CommandItem
                   key={option.value}
                   value={option.value}
                   onSelect={(currentValue) => {
-                    onChange(currentValue === value ? '' : currentValue);
+                    const newValue = currentValue === value ? '' : currentValue;
+                    onChange(newValue);
+                    setInputValue(newValue);
                     setOpen(false);
                   }}
                 >

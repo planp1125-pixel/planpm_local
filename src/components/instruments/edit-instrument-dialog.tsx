@@ -43,7 +43,7 @@ const formSchema = z.object({
     required_error: 'Schedule date is required.',
   }),
   frequency: z.string().min(1, 'Frequency is required.'),
-  imageId: z.string().min(1, "Please select an image"),
+  imageId: z.string().optional(),
 });
 
 type EditInstrumentFormValues = z.infer<typeof formSchema>;
@@ -103,6 +103,7 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
       frequency: values.frequency as MaintenanceFrequency,
       scheduleDate: Timestamp.fromDate(values.scheduleDate),
       nextMaintenanceDate: Timestamp.fromDate(nextMaintenanceDate),
+      imageId: values.imageId || 'spectrometer',
     };
     
     // Add new instrument type to the list if it's not already there
@@ -258,7 +259,7 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
                 )}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
                 <FormField
                     control={form.control}
                     name="frequency"
@@ -273,28 +274,6 @@ export function EditInstrumentDialog({ isOpen, onOpenChange, instrument }: EditI
                         </FormControl>
                         <SelectContent>
                             {frequencies.map(freq => <SelectItem key={freq} value={freq}>{freq}</SelectItem>)}
-                        </SelectContent>
-                        </Select>
-                        <FormMessage />
-                    </FormItem>
-                    )}
-                />
-                 <FormField
-                    control={form.control}
-                    name="imageId"
-                    render={({ field }) => (
-                    <FormItem>
-                        <FormLabel>Instrument Image</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                            <SelectTrigger>
-                            <SelectValue placeholder="Select an image type" />
-                            </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                            {PlaceHolderImages.map(image => (
-                                <SelectItem key={image.id} value={image.id}>{image.description}</SelectItem>
-                            ))}
                         </SelectContent>
                         </Select>
                         <FormMessage />
