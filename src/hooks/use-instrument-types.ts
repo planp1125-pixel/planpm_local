@@ -37,13 +37,13 @@ export function useInstrumentTypes() {
     }, [dbTypes]);
 
     const addInstrumentType = (typeName: string) => {
-        if (!firestore) return;
+        if (!firestore || !typeName) return;
         
         const typeExists = instrumentTypes.some(t => t.value.toLowerCase() === typeName.toLowerCase());
         if (typeExists) return;
 
-        const newTypeRef = doc(collection(firestore, 'instrumentTypes'));
-        setDoc(newTypeRef, { name: typeName });
+        const newTypeRef = collection(firestore, 'instrumentTypes');
+        addDocumentNonBlocking(newTypeRef, { name: typeName });
     };
 
     return { instrumentTypes, addInstrumentType, isLoading };
