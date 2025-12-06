@@ -142,9 +142,7 @@ export const columns = (
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => onEdit(instrument)}>
-                  Edit Instrument
-                </DropdownMenuItem>
+
                 <DropdownMenuItem onClick={() => onDelete(instrument)} className="text-destructive">
                   Delete Instrument
                 </DropdownMenuItem>

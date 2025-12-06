@@ -1,11 +1,11 @@
 import { InstrumentDetailClientPage } from "@/components/instruments/instrument-detail-client-page";
 
-export default function InstrumentDetailPage({
+export default async function InstrumentDetailPage({
   params,
 }: {
-  params: { instrumentId: string };
+  params: Promise<{ instrumentId: string }>;
 }) {
-  return <InstrumentDetailClientPage instrumentId={params.instrumentId} />;
+  const { instrumentId } = await params;
+  return <InstrumentDetailClientPage instrumentId={instrumentId} />;
 }
 
-    

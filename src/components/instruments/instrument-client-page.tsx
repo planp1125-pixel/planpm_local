@@ -67,20 +67,30 @@ export function InstrumentClientPage() {
   const confirmDelete = async () => {
     if (!deletingInstrument) return;
 
-    const { error } = await supabase.from('instruments').delete().eq('id', deletingInstrument.id);
+    try {
+      // Delete Results
+      await supabase.from('maintenanceResults').delete().eq('instrumentId', deletingInstrument.id);
+      // Delete Schedules
+      await supabase.from('maintenanceSchedules').delete().eq('instrumentId', deletingInstrument.id);
+      // Delete Configurations
+      await supabase.from('maintenance_configurations').delete().eq('instrument_id', deletingInstrument.id);
 
-    if (error) {
-      console.error('Error deleting instrument:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete instrument.',
-        variant: 'destructive',
-      });
-    } else {
+      // Delete Instrument
+      const { error } = await supabase.from('instruments').delete().eq('id', deletingInstrument.id);
+
+      if (error) throw error;
+
       setInstruments(prev => prev.filter(i => i.id !== deletingInstrument.id));
       toast({
         title: 'Instrument Deleted',
         description: `${deletingInstrument.eqpId} has been removed from the inventory.`,
+        variant: 'destructive',
+      });
+    } catch (error) {
+      console.error('Error deleting instrument:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete instrument.',
         variant: 'destructive',
       });
     }

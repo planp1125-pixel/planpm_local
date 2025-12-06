@@ -30,8 +30,9 @@ import { useInstrumentTypes } from '@/hooks/use-instrument-types';
 import { useMaintenanceTypes } from '@/hooks/use-maintenance-types';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 import { useAuth } from '@/contexts/auth-context';
+import { DatePicker } from '@/components/ui/date-picker';
 
-const frequencies: MaintenanceFrequency[] = ['Weekly', 'Monthly', '3 Months', '6 Months', '1 Year'];
+const frequencies: MaintenanceFrequency[] = ['Daily', 'Weekly', 'Monthly', '3 Months', '6 Months', '1 Year'];
 
 const scheduleSchema = z.object({
   maintenanceType: z.string().min(1, 'Maintenance type is required.'),
@@ -87,42 +88,7 @@ const instrumentTypeToImageId: Record<string, string> = {
   'default': 'centrifuge'
 };
 
-interface DatePickerProps {
-  value: Date;
-  onChange: (date: Date | undefined) => void;
-}
 
-const DatePicker = ({ value, onChange }: DatePickerProps) => {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <FormControl>
-          <Button
-            variant={'outline'}
-            className={cn('pl-3 text-left font-normal', !value && 'text-muted-foreground')}
-          >
-            {value ? format(value, 'PPP') : <span>Pick a date</span>}
-            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-          </Button>
-        </FormControl>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <Calendar
-          mode="single"
-          selected={value}
-          onSelect={(date) => {
-            onChange(date);
-            setOpen(false);
-          }}
-          disabled={(date) => date < new Date('1900-01-01')}
-          initialFocus
-        />
-      </PopoverContent>
-    </Popover>
-  );
-};
 
 
 export function AddInstrumentDialog({ isOpen, onOpenChange, onSuccess }: AddInstrumentDialogProps) {

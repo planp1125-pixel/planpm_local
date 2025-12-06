@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { differenceInDays, addWeeks, addMonths, addYears } from 'date-fns';
+import { differenceInDays, addWeeks, addMonths, addYears, format } from 'date-fns';
+import { useAuth } from '@/contexts/auth-context';
 import { supabase } from '@/lib/supabase';
 import type { MaintenanceEvent, Instrument, MaintenanceConfiguration, MaintenanceFrequency } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
@@ -33,8 +34,6 @@ interface EnhancedEvent extends MaintenanceEvent {
   completedSections?: number;
 }
 
-import { useAuth } from '@/contexts/auth-context';
-
 const getNextDate = (date: Date, frequency: MaintenanceFrequency): Date => {
   switch (frequency) {
     case 'Weekly': return addWeeks(date, 1);
@@ -47,7 +46,6 @@ const getNextDate = (date: Date, frequency: MaintenanceFrequency): Date => {
 };
 
 export function UpcomingMaintenanceList() {
-  const { user } = useAuth();
   const [upcomingSchedules, setUpcomingSchedules] = useState<EnhancedEvent[]>([]);
   const [instrumentsMap, setInstrumentsMap] = useState<Record<string, Instrument>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -61,6 +59,7 @@ export function UpcomingMaintenanceList() {
   const [timeRange, setTimeRange] = useState<TimeRange>('30');
   const [sortField, setSortField] = useState<SortField>('dueDate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const { user } = useAuth();
 
   const fetchUpcoming = async () => {
     setIsLoading(true);
@@ -104,13 +103,15 @@ export function UpcomingMaintenanceList() {
         return { status: 'Completed', totalSections: 0, completedSections: 0 };
       };
 
-      // Process each configuration
       if (configs && instruments) {
+        console.log('DEBUG: Fetched Configs:', configs); // DEBUG LOG
         configs.forEach((config: MaintenanceConfiguration) => {
           // Find any EXISTING open schedule for this config (approx match on type/instrument)
-          // Ideally maintenanceSchedules should have config_id, but current schema might not.
-          // We match by instrumentId and type.
-          const existingSchedules = schedules?.filter(s =>
+          // Map any potential snake_case to camelCase for consistency
+          const existingSchedules = schedules?.map(s => ({
+            ...s,
+            templateId: s.templateId || s.template_id
+          })).filter(s =>
             s.instrumentId === config.instrument_id &&
             s.type === config.maintenance_type
           ) || [];
@@ -124,12 +125,15 @@ export function UpcomingMaintenanceList() {
           if (openSchedule) {
             // Use the real schedule
             const { status, totalSections, completedSections } = getMaintenanceStatus(openSchedule.id, openSchedule.dueDate);
+            const templateIdToUse = config.template_id || (config as any).templateId || openSchedule.templateId;
+            console.log(`DEBUG: Processing ${config.id}, OpenSchedule: ${openSchedule.id}, TemplateID: ${templateIdToUse}`); // DEBUG
+
             combinedEvents.push({
               ...openSchedule,
               maintenanceStatus: status,
               totalSections,
               completedSections,
-              templateId: config.template_id // Ensure template ID is passed
+              templateId: templateIdToUse // Ensure template ID is passed
             });
           } else {
             // No open schedule, calculate NEXT due date
@@ -142,32 +146,32 @@ export function UpcomingMaintenanceList() {
             } else if (openSchedule) {
               // Should be covered above, but just in case
             } else if (new Date(config.schedule_date) < new Date() && !lastCompleted) {
-              // Never done, start date passed -> It is the due date (Overdue)
               nextDue = new Date(config.schedule_date);
             } else {
-              // If configured start date is in future, wait for it.
-              // If configured start date is way in past but no record, loop until future? 
-              // For simplicity, let's assume if no record, the schedule_date IS the next due, even if old.
               nextDue = new Date(config.schedule_date);
             }
 
             // Only add if within range
             if (nextDue <= futureDate) {
               const isPastDue = nextDue < new Date();
+              const templateIdToUse = (config as any).templateId || config.template_id;
+              console.log(`DEBUG: Virtual Event ${config.id}, TemplateID: ${templateIdToUse}`); // DEBUG
+
               combinedEvents.push({
-                id: `virtual-${config.id}-${nextDue.getTime()}`, // unique ID
+                id: `virtual-${config.id}-${nextDue.getTime()}`,
                 instrumentId: config.instrument_id,
                 dueDate: nextDue.toISOString(),
-                type: config.maintenance_type as any, // Cast to match type
+                type: config.maintenance_type as any,
                 description: `Scheduled ${config.maintenance_type}`,
                 status: 'Scheduled',
                 maintenanceStatus: isPastDue ? 'Overdue' : 'Pending',
-                templateId: config.template_id
+                templateId: templateIdToUse
               });
             }
           }
         });
       }
+      console.log('DEBUG: Combined Events:', combinedEvents); // DEBUG LOG
 
       setUpcomingSchedules(combinedEvents);
     } catch (err) {
@@ -189,11 +193,17 @@ export function UpcomingMaintenanceList() {
         type: event.type,
         description: event.description,
         status: 'Scheduled',
-        user_id: user?.id
+        user_id: user?.id,
+        templateId: event.templateId || null
       }).select().single();
 
       if (data) {
-        setSelectedSchedule(data);
+        // Preserve templateId from the event (config) because DB insert might not return it 
+        // if the column is missing or named differently (e.g. template_id vs templateId)
+        setSelectedSchedule({
+          ...data,
+          templateId: event.templateId || data.templateId || data.template_id
+        });
         setSelectedInstrumentId(data.instrumentId);
       }
     } else {

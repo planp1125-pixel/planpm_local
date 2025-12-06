@@ -1,7 +1,7 @@
 
 
 export type InstrumentStatus = 'AMC' | 'PM' | 'Operational' | 'Out of Service';
-export type MaintenanceFrequency = 'Weekly' | 'Monthly' | '3 Months' | '6 Months' | '1 Year';
+export type MaintenanceFrequency = 'Daily' | 'Weekly' | 'Monthly' | '3 Months' | '6 Months' | '1 Year';
 export type InstrumentType = "Lab Balance" | "Scale" | "pH Meter" | "Tap Density Tester" | "UV-Vis Spectrophotometer" | "GC" | "Spectrometer";
 export type MaintenanceTaskType = "Calibration" | "Preventative Maintenance" | "Validation" | "AMC";
 export type MaintenanceResultType = 'calibration' | 'service' | 'spare_quotation' | 'other';
