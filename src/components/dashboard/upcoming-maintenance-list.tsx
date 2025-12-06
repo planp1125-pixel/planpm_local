@@ -1,103 +1,507 @@
 'use client';
 
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { differenceInDays } from 'date-fns';
-import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
-import { collection, Timestamp, query, where, orderBy } from 'firebase/firestore';
-import type { Instrument, InstrumentStatus } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+import type { MaintenanceEvent, Instrument } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
+import { UpdateMaintenanceDialog } from '../maintenance/update-maintenance-dialog';
+import { ViewMaintenanceResultDialog } from '../maintenance/view-maintenance-result-dialog';
+import { CheckCircle, Clock, AlertCircle, CircleDot, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
-const statusColorMap: Record<InstrumentStatus, string> = {
-  'Operational': 'bg-green-100 dark:bg-green-900/30',
-  'AMC': 'bg-blue-100 dark:bg-blue-900/30',
-  'PM': 'bg-yellow-100 dark:bg-yellow-900/30',
-  'Needs Maintenance': 'bg-orange-100 dark:bg-orange-900/30',
-  'Out of Service': 'bg-red-100 dark:bg-red-900/30',
-};
+type MaintenanceStatus = 'Completed' | 'Pending' | 'Partially Completed' | 'Overdue';
+type SortField = 'instrument' | 'type' | 'location' | 'dueDate' | 'status' | 'daysLeft' | 'instrumentType';
+type SortOrder = 'asc' | 'desc';
+type TimeRange = '30' | '90' | '180' | '365';
 
+interface EnhancedEvent extends MaintenanceEvent {
+  maintenanceStatus: MaintenanceStatus;
+  totalSections?: number;
+  completedSections?: number;
+}
+
+import { useAuth } from '@/contexts/auth-context';
 
 export function UpcomingMaintenanceList() {
-  const firestore = useFirestore();
+  const { user } = useAuth();
+  const [upcomingSchedules, setUpcomingSchedules] = useState<EnhancedEvent[]>([]);
+  const [instrumentsMap, setInstrumentsMap] = useState<Record<string, Instrument>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedSchedule, setSelectedSchedule] = useState<MaintenanceEvent | null>(null);
+  const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>('');
+  const [viewSchedule, setViewSchedule] = useState<MaintenanceEvent | null>(null);
+  const [viewInstrumentId, setViewInstrumentId] = useState<string>('');
 
-  const upcomingQuery = useMemoFirebase(() => {
-    if (!firestore) return null;
-    const now = Timestamp.now();
-    const thirtyDaysFromNow = Timestamp.fromMillis(now.toMillis() + 30 * 24 * 60 * 60 * 1000);
-    
-    return query(
-      collection(firestore, 'instruments'),
-      where('nextMaintenanceDate', '>=', now),
-      where('nextMaintenanceDate', '<=', thirtyDaysFromNow),
-      orderBy('nextMaintenanceDate', 'asc')
-    );
-  }, [firestore]);
+  // Search and filter state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [timeRange, setTimeRange] = useState<TimeRange>('30');
+  const [sortField, setSortField] = useState<SortField>('dueDate');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
-  const { data: upcoming, isLoading } = useCollection<Instrument>(upcomingQuery);
+  const fetchUpcoming = async () => {
+    const now = new Date();
+    const days = parseInt(timeRange);
+    const futureDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+    // Fetch existing schedules (including completed ones for status display)
+    const { data: schedules } = await supabase
+      .from('maintenanceSchedules')
+      .select('*')
+      .gte('dueDate', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()) // Include last 7 days
+      .lte('dueDate', futureDate);
+
+    // Fetch maintenance results to check completion status
+    const { data: results } = await supabase
+      .from('maintenanceResults')
+      .select('*');
+
+    // Fetch instruments due soon
+    const { data: instrumentsDue } = await supabase
+      .from('instruments')
+      .select('*')
+      .gte('nextMaintenanceDate', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .lte('nextMaintenanceDate', futureDate);
+
+    let allInstruments = instrumentsDue || [];
+
+    if (schedules && schedules.length > 0) {
+      const scheduleInstrumentIds = schedules.map(s => s.instrumentId);
+      const missingIds = scheduleInstrumentIds.filter(id => !allInstruments.find(i => i.id === id));
+
+      if (missingIds.length > 0) {
+        const { data: extraInstruments } = await supabase
+          .from('instruments')
+          .select('*')
+          .in('id', missingIds);
+        if (extraInstruments) {
+          allInstruments = [...allInstruments, ...extraInstruments];
+        }
+      }
+    }
+
+    // Create map
+    const instMap: Record<string, Instrument> = {};
+    allInstruments.forEach(i => instMap[i.id] = i);
+    setInstrumentsMap(instMap);
+
+    // Helper to determine status
+    const getMaintenanceStatus = (scheduleId: string, dueDate: string): { status: MaintenanceStatus; totalSections: number; completedSections: number } => {
+      const result = results?.find(r => r.maintenanceScheduleId === scheduleId);
+
+      if (!result) {
+        const isPastDue = new Date(dueDate) < new Date();
+        return {
+          status: isPastDue ? 'Overdue' : 'Pending',
+          totalSections: 0,
+          completedSections: 0
+        };
+      }
+
+      // Check testData for partial completion
+      const testData = result.testData as any[] | null;
+      if (testData && Array.isArray(testData)) {
+        const totalSections = testData.length;
+        const completedSections = testData.filter(section =>
+          section.rows?.every((row: any) => row.measured !== undefined)
+        ).length;
+
+        if (completedSections === 0) {
+          return { status: 'Pending', totalSections, completedSections };
+        } else if (completedSections < totalSections) {
+          return { status: 'Partially Completed', totalSections, completedSections };
+        }
+      }
+
+      return { status: 'Completed', totalSections: 0, completedSections: 0 };
+    };
+
+    // Merge and enhance
+    const combined: EnhancedEvent[] = [];
+
+    // Add existing schedules
+    if (schedules) {
+      schedules.forEach(schedule => {
+        const { status, totalSections, completedSections } = getMaintenanceStatus(schedule.id, schedule.dueDate);
+        combined.push({
+          ...schedule,
+          maintenanceStatus: status,
+          totalSections,
+          completedSections
+        });
+      });
+    }
+
+    // Add instruments that don't have a schedule yet
+    if (instrumentsDue) {
+      instrumentsDue.forEach(inst => {
+        const hasSchedule = schedules?.some(s => s.instrumentId === inst.id);
+
+        if (!hasSchedule) {
+          let type: 'Preventative Maintenance' | 'AMC' = 'Preventative Maintenance';
+          if (inst.status === 'AMC') type = 'AMC';
+
+          const isPastDue = new Date(inst.nextMaintenanceDate) < new Date();
+
+          combined.push({
+            id: `virtual-${inst.id}`,
+            instrumentId: inst.id,
+            dueDate: inst.nextMaintenanceDate,
+            type: type,
+            description: `Scheduled Maintenance`,
+            status: 'Scheduled',
+            maintenanceStatus: isPastDue ? 'Overdue' : 'Pending',
+          });
+        }
+      });
+    }
+
+    setUpcomingSchedules(combined);
+    setIsLoading(false);
+  };
+
+  useEffect(() => {
+    fetchUpcoming();
+  }, [timeRange]);
+
+  const handleUpdateClick = async (event: MaintenanceEvent) => {
+    if (event.id.startsWith('virtual-')) {
+      const { data, error } = await supabase.from('maintenanceSchedules').insert({
+        instrumentId: event.instrumentId,
+        dueDate: event.dueDate,
+        type: event.type,
+        description: event.description,
+        status: 'Scheduled',
+        user_id: user?.id
+      }).select().single();
+
+      if (data) {
+        setSelectedSchedule(data);
+        setSelectedInstrumentId(data.instrumentId);
+      }
+    } else {
+      setSelectedSchedule(event);
+      setSelectedInstrumentId(event.instrumentId);
+    }
+  };
+
+  const getStatusBadge = (event: EnhancedEvent) => {
+    switch (event.maintenanceStatus) {
+      case 'Completed':
+        return (
+          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+            <CheckCircle className="w-3 h-3 mr-1" /> Completed
+          </Badge>
+        );
+      case 'Partially Completed':
+        return (
+          <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+            <CircleDot className="w-3 h-3 mr-1" />
+            Partial ({event.completedSections}/{event.totalSections})
+          </Badge>
+        );
+      case 'Overdue':
+        return (
+          <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+            <AlertCircle className="w-3 h-3 mr-1" /> Overdue
+          </Badge>
+        );
+      default:
+        return (
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+            <Clock className="w-3 h-3 mr-1" /> Pending
+          </Badge>
+        );
+    }
+  };
+
+  // Sorting logic
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1" />;
+    return sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 ml-1" /> : <ArrowDown className="w-3 h-3 ml-1" />;
+  };
+
+  // Filter and sort data
+  const filteredAndSortedData = useMemo(() => {
+    let data = [...upcomingSchedules];
+
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      data = data.filter(schedule => {
+        const instrument = instrumentsMap[schedule.instrumentId];
+        return (
+          instrument?.eqpId?.toLowerCase().includes(term) ||
+          instrument?.instrumentType?.toLowerCase().includes(term) ||
+          instrument?.model?.toLowerCase().includes(term) ||
+          instrument?.location?.toLowerCase().includes(term) ||
+          schedule.type?.toLowerCase().includes(term)
+        );
+      });
+    }
+
+    // Sort
+    data.sort((a, b) => {
+      const instA = instrumentsMap[a.instrumentId];
+      const instB = instrumentsMap[b.instrumentId];
+      let comparison = 0;
+
+      switch (sortField) {
+        case 'instrument':
+          comparison = (instA?.eqpId || '').localeCompare(instB?.eqpId || '');
+          break;
+        case 'instrumentType':
+          comparison = (instA?.instrumentType || '').localeCompare(instB?.instrumentType || '');
+          break;
+        case 'type':
+          comparison = (a.type || '').localeCompare(b.type || '');
+          break;
+        case 'location':
+          comparison = (instA?.location || '').localeCompare(instB?.location || '');
+          break;
+        case 'dueDate':
+          comparison = new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+          break;
+        case 'status':
+          comparison = (a.maintenanceStatus || '').localeCompare(b.maintenanceStatus || '');
+          break;
+        case 'daysLeft':
+          comparison = differenceInDays(new Date(a.dueDate), new Date()) - differenceInDays(new Date(b.dueDate), new Date());
+          break;
+      }
+
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return data;
+  }, [upcomingSchedules, instrumentsMap, searchTerm, sortField, sortOrder]);
+
+  const timeRangeLabel = {
+    '30': 'Next 30 Days',
+    '90': 'Next 3 Months',
+    '180': 'Next 6 Months',
+    '365': 'Next 1 Year'
+  };
 
   return (
-    <Card className="transition-all hover:shadow-md">
-      <CardHeader>
-        <CardTitle className="font-headline">Upcoming Maintenance</CardTitle>
-        <CardDescription>Instruments requiring maintenance in the next 30 days.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Instrument</TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Due Date</TableHead>
-              <TableHead className="text-right">Days Left</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-               Array.from({ length: 3 }).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell><Skeleton className="h-6 w-32"/></TableCell>
-                  <TableCell><Skeleton className="h-6 w-48"/></TableCell>
-                  <TableCell><Skeleton className="h-6 w-24"/></TableCell>
-                  <TableCell><Skeleton className="h-6 w-24"/></TableCell>
-                  <TableCell className="text-right"><Skeleton className="h-6 w-16 ml-auto"/></TableCell>
-                </TableRow>
-              ))
-            ) : upcoming && upcoming.length > 0 ? (
-              upcoming.map(inst => {
-                if (!inst.nextMaintenanceDate) return null;
-                const dueDate = inst.nextMaintenanceDate.toDate();
-                const daysLeft = differenceInDays(dueDate, new Date());
-                return (
-                  <TableRow key={inst.id} className={cn(statusColorMap[inst.status])}>
-                    <TableCell>
-                      <div className="font-medium">{inst.eqpId}</div>
-                      <div className="text-sm text-muted-foreground">{inst.instrumentType}</div>
-                    </TableCell>
-                     <TableCell>
-                      <div className="font-medium">{inst.model}</div>
-                      <div className="text-sm text-muted-foreground">{inst.serialNumber}</div>
-                    </TableCell>
-                    <TableCell>{inst.location}</TableCell>
-                    <TableCell>{dueDate.toLocaleDateString()}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={daysLeft <= 7 ? 'destructive' : 'secondary'}>{daysLeft} days</Badge>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            ) : (
+    <>
+      <Card className="transition-all hover:shadow-md">
+        <CardHeader>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <CardTitle className="font-headline">Upcoming Maintenance</CardTitle>
+              <CardDescription>{timeRangeLabel[timeRange]}</CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search..."
+                  className="pl-8 w-[200px]"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              {/* Time Range Filter */}
+              <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 Days</SelectItem>
+                  <SelectItem value="90">3 Months</SelectItem>
+                  <SelectItem value="180">6 Months</SelectItem>
+                  <SelectItem value="365">1 Year</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
-                  No upcoming maintenance in the next 30 days.
-                </TableCell>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('instrument')}>
+                    Instrument {getSortIcon('instrument')}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('instrumentType')}>
+                    Type {getSortIcon('instrumentType')}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('location')}>
+                    Location {getSortIcon('location')}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('dueDate')}>
+                    Due Date {getSortIcon('dueDate')}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('type')}>
+                    Maint. Type {getSortIcon('type')}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2" onClick={() => handleSort('status')}>
+                    Status {getSortIcon('status')}
+                  </Button>
+                </TableHead>
+                <TableHead className="text-right">
+                  <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('daysLeft')}>
+                    Days Until Due {getSortIcon('daysLeft')}
+                  </Button>
+                </TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                    <TableCell><Skeleton className="h-6 w-20" /></TableCell>
+                    <TableCell className="text-right"><Skeleton className="h-6 w-16 ml-auto" /></TableCell>
+                    <TableCell className="text-right"><Skeleton className="h-8 w-20 ml-auto" /></TableCell>
+                  </TableRow>
+                ))
+              ) : filteredAndSortedData.length > 0 ? (
+                filteredAndSortedData.map(schedule => {
+                  const dueDate = new Date(schedule.dueDate);
+                  const daysLeft = differenceInDays(dueDate, new Date());
+                  const instrument = instrumentsMap[schedule.instrumentId];
+
+                  // Format type display
+                  let typeDisplay: string = schedule.type;
+                  if (schedule.type === 'Preventative Maintenance') typeDisplay = 'PM';
+                  if (schedule.type === 'AMC') typeDisplay = 'AMC';
+
+                  return (
+                    <TableRow
+                      key={schedule.id}
+                      className={cn(
+                        schedule.maintenanceStatus === 'Completed' && "opacity-60"
+                      )}
+                    >
+                      <TableCell>
+                        <div className="font-medium">{instrument?.eqpId || 'Unknown'}</div>
+                        <div className="text-xs text-muted-foreground">{instrument?.model}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-normal">
+                          {instrument?.instrumentType || '-'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{instrument?.location || '-'}</TableCell>
+                      <TableCell>{dueDate.toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{typeDisplay}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {getStatusBadge(schedule)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={daysLeft < 0 ? 'destructive' : daysLeft <= 7 ? 'destructive' : 'secondary'}>
+                          {daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d`}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {schedule.maintenanceStatus !== 'Completed' && (
+                          <Button
+                            size="sm"
+                            variant={schedule.maintenanceStatus === 'Partially Completed' ? 'default' : 'outline'}
+                            onClick={() => handleUpdateClick(schedule)}
+                          >
+                            {schedule.maintenanceStatus === 'Partially Completed' ? 'Continue' : 'Update'}
+                          </Button>
+                        )}
+                        {schedule.maintenanceStatus === 'Completed' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setViewSchedule(schedule);
+                              setViewInstrumentId(schedule.instrumentId);
+                            }}
+                          >
+                            View
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
+                    {searchTerm ? 'No results match your search.' : `No upcoming maintenance in the ${timeRangeLabel[timeRange].toLowerCase()}.`}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {selectedSchedule && (
+        <UpdateMaintenanceDialog
+          isOpen={!!selectedSchedule}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedSchedule(null);
+              setSelectedInstrumentId('');
+            }
+          }}
+          maintenanceEvent={selectedSchedule}
+          instrumentId={selectedInstrumentId}
+          onSuccess={fetchUpcoming}
+        />
+      )}
+
+      {viewSchedule && (
+        <ViewMaintenanceResultDialog
+          isOpen={!!viewSchedule}
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewSchedule(null);
+              setViewInstrumentId('');
+            }
+          }}
+          maintenanceEvent={viewSchedule}
+          instrumentId={viewInstrumentId}
+        />
+      )}
+    </>
   );
 }

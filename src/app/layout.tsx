@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { MainLayout } from '@/components/layout/main-layout';
 import { Toaster } from "@/components/ui/toaster";
-import { FirebaseClientProvider } from '@/firebase';
+import { SupabaseProvider } from '@/components/SupabaseProvider';
 import { AppContent } from '@/components/layout/app-content';
+import { ThemeProvider } from '@/components/theme-provider';
+import { AuthProvider } from '@/contexts/auth-context';
 
 export const metadata: Metadata = {
   title: 'LabTrack',
@@ -23,15 +25,25 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased">
-        <FirebaseClientProvider>
-          <AppContent>
-            <MainLayout>
-              {children}
-            </MainLayout>
-          </AppContent>
-        </FirebaseClientProvider>
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <SupabaseProvider>
+            <AuthProvider>
+              <AppContent>
+                <MainLayout>
+                  {children}
+                </MainLayout>
+              </AppContent>
+            </AuthProvider>
+          </SupabaseProvider>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );
 }
+

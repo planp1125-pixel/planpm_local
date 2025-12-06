@@ -1,17 +1,69 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, Wrench, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { isAfter } from 'date-fns';
-import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
-import { collection, Timestamp } from 'firebase/firestore';
-import type { Instrument } from '@/lib/types';
+import { Wrench, Settings, ClipboardCheck, Calendar } from 'lucide-react';
+import { startOfMonth, endOfMonth } from 'date-fns';
+import { supabase } from '@/lib/supabase';
 import { Skeleton } from '@/components/ui/skeleton';
 
+type MaintenanceCounts = {
+  pm: number;
+  amc: number;
+  calibration: number;
+  total: number;
+};
+
 export function OverviewCards() {
-  const firestore = useFirestore();
-  const query = useMemoFirebase(() => firestore ? collection(firestore, 'instruments') : null, [firestore]);
-  const { data: instruments, isLoading } = useCollection<Instrument>(query);
+  const [counts, setCounts] = useState<MaintenanceCounts>({ pm: 0, amc: 0, calibration: 0, total: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const now = new Date();
+      const monthStart = startOfMonth(now);
+      const monthEnd = endOfMonth(now);
+
+      // Fetch schedules for current month
+      const { data: schedules } = await supabase
+        .from('maintenanceSchedules')
+        .select('type, status')
+        .gte('dueDate', monthStart.toISOString())
+        .lte('dueDate', monthEnd.toISOString());
+
+      // Also fetch results for calibration count
+      const { data: results } = await supabase
+        .from('maintenanceResults')
+        .select('resultType, completedDate')
+        .gte('completedDate', monthStart.toISOString())
+        .lte('completedDate', monthEnd.toISOString());
+
+      let pm = 0, amc = 0, calibration = 0;
+
+      if (schedules) {
+        schedules.forEach(s => {
+          if (s.type === 'Preventative Maintenance' || s.type === 'PM') pm++;
+          else if (s.type === 'AMC') amc++;
+        });
+      }
+
+      if (results) {
+        results.forEach(r => {
+          if (r.resultType === 'calibration') calibration++;
+        });
+      }
+
+      setCounts({
+        pm,
+        amc,
+        calibration,
+        total: pm + amc
+      });
+      setIsLoading(false);
+    };
+
+    fetchData();
+  }, []);
 
   if (isLoading) {
     return (
@@ -31,19 +83,11 @@ export function OverviewCards() {
     );
   }
 
-  const totalInstruments = instruments?.length || 0;
-  const operational = instruments?.filter(inst => inst.status === 'Operational').length || 0;
-  const needsMaintenance = instruments?.filter(inst => inst.status === 'Needs Maintenance').length || 0;
-  const overdue = instruments?.filter(inst => {
-    const nextDate = inst.nextMaintenanceDate?.toDate();
-    return nextDate && isAfter(new Date(), nextDate) && inst.status !== 'Archived' && inst.status !== 'Out of Service';
-  }).length || 0;
-
   const cardData = [
-    { title: 'Total Instruments', value: totalInstruments, icon: FlaskConical },
-    { title: 'Operational', value: operational, icon: ShieldCheck },
-    { title: 'Needs Maintenance', value: needsMaintenance, icon: Wrench },
-    { title: 'Overdue', value: overdue, icon: AlertTriangle, className: 'text-destructive' },
+    { title: 'Total This Month', value: counts.total, icon: Calendar, description: 'Scheduled maintenance' },
+    { title: 'PM', value: counts.pm, icon: Wrench, description: 'Preventative Maintenance' },
+    { title: 'AMC', value: counts.amc, icon: Settings, description: 'Annual Maintenance Contract' },
+    { title: 'Calibrations', value: counts.calibration, icon: ClipboardCheck, description: 'Completed this month' },
   ];
 
   return (
@@ -55,7 +99,8 @@ export function OverviewCards() {
             <card.icon className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${card.className || ''}`}>{card.value}</div>
+            <div className="text-2xl font-bold">{card.value}</div>
+            <p className="text-xs text-muted-foreground">{card.description}</p>
           </CardContent>
         </Card>
       ))}

@@ -3,32 +3,41 @@
 import { PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useMemo, useState, useEffect } from 'react';
-import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { supabase } from '@/lib/supabase';
 import type { Instrument } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 
 
 const COLORS = {
-  'Operational': 'hsl(var(--chart-1))',
-  'Needs Maintenance': 'hsl(var(--chart-2))',
-  'Out of Service': 'hsl(var(--destructive))',
-  'Archived': 'hsl(var(--muted))',
+  'PM': 'hsl(var(--chart-1))',
+  'AMC': 'hsl(var(--chart-2))',
+  'Calibration': 'hsl(var(--chart-3))',
+  'Validation': 'hsl(var(--chart-4))',
 };
 
 const Chart = () => {
-  const firestore = useFirestore();
-  const query = useMemoFirebase(() => firestore ? collection(firestore, 'instruments') : null, [firestore]);
-  const { data: instruments, isLoading } = useCollection<Instrument>(query);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchInstruments = async () => {
+      const { data, error } = await supabase.from('instruments').select('*');
+      if (data) setInstruments(data);
+      setIsLoading(false);
+    };
+
+    fetchInstruments();
+  }, []);
 
   const data = useMemo(() => {
     if (!instruments) return [];
-    const statusCounts = instruments.reduce((acc, instrument) => {
-      acc[instrument.status] = (acc[instrument.status] || 0) + 1;
+    const typeCounts = instruments.reduce((acc, instrument) => {
+      const type = instrument.maintenanceType || 'Unknown';
+      acc[type] = (acc[type] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
-    return Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+    return Object.entries(typeCounts).map(([name, value]) => ({ name, value }));
   }, [instruments]);
 
   if (isLoading) {

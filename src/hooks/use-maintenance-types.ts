@@ -5,25 +5,22 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/auth-context';
 
 const initialTypes = [
-    { label: 'Lab Balance', value: 'Lab Balance' },
-    { label: 'Scale', value: 'Scale' },
-    { label: 'pH Meter', value: 'pH Meter' },
-    { label: 'Tap Density Tester', value: 'Tap Density Tester' },
-    { label: 'UV-Vis Spectrophotometer', value: 'UV-Vis Spectrophotometer' },
-    { label: 'GC', value: 'GC' },
-    { label: 'Spectrometer', value: 'Spectrometer' }
+    { label: 'PM', value: 'PM' },
+    { label: 'AMC', value: 'AMC' },
+    { label: 'Calibration', value: 'Calibration' },
+    { label: 'Validation', value: 'Validation' },
 ];
 
-export function useInstrumentTypes() {
+export function useMaintenanceTypes() {
     const [dbTypes, setDbTypes] = useState<{ name: string }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const { user } = useAuth();
 
     useEffect(() => {
         const fetchTypes = async () => {
-            const { data, error } = await supabase.from('instrumentTypes').select('name');
+            const { data, error } = await supabase.from('maintenanceTypes').select('name');
             if (error) {
-                console.error('Error fetching instrument types:', error);
+                console.error('Error fetching maintenance types:', error);
             } else {
                 setDbTypes(data || []);
             }
@@ -33,7 +30,7 @@ export function useInstrumentTypes() {
         fetchTypes();
     }, []);
 
-    const instrumentTypes = useMemo(() => {
+    const maintenanceTypes = useMemo(() => {
         const allTypes = [...initialTypes];
         if (dbTypes) {
             dbTypes.forEach(dbType => {
@@ -45,20 +42,20 @@ export function useInstrumentTypes() {
         return allTypes;
     }, [dbTypes]);
 
-    const addInstrumentType = async (typeName: string) => {
+    const addMaintenanceType = async (typeName: string) => {
         if (!typeName) return;
 
-        const typeExists = instrumentTypes.some(t => t.value.toLowerCase() === typeName.toLowerCase());
+        const typeExists = maintenanceTypes.some(t => t.value.toLowerCase() === typeName.toLowerCase());
         if (typeExists) return;
 
-        const { error } = await supabase.from('instrumentTypes').insert({ name: typeName, user_id: user?.id });
+        const { error } = await supabase.from('maintenanceTypes').insert({ name: typeName, user_id: user?.id });
         if (error) {
-            console.error('Error adding instrument type:', error);
+            console.error('Error adding maintenance type:', error);
         } else {
             setDbTypes(prev => [...prev, { name: typeName }]);
         }
     };
 
-    return { instrumentTypes, addInstrumentType, isLoading };
+    return { maintenanceTypes, addMaintenanceType, isLoading };
 }
 

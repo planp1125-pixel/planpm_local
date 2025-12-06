@@ -13,8 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Bot, Lightbulb, Loader2 } from 'lucide-react';
-import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
-import { collection, query, where, getDocs, collectionGroup } from 'firebase/firestore';
+import { supabase } from '@/lib/supabase';
 import type { Instrument, MaintenanceEvent } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 
@@ -35,9 +34,18 @@ export function AdvisorForm({ instrumentId: initialInstrumentId }: { instrumentI
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const firestore = useFirestore();
-  const instrumentsQuery = useMemoFirebase(() => firestore ? collection(firestore, 'instruments') : null, [firestore]);
-  const { data: instruments, isLoading: isLoadingInstruments } = useCollection<Omit<Instrument, 'id'>>(instrumentsQuery);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [isLoadingInstruments, setIsLoadingInstruments] = useState(true);
+
+  useEffect(() => {
+    const fetchInstruments = async () => {
+      const { data, error } = await supabase.from('instruments').select('*');
+      if (data) setInstruments(data);
+      setIsLoadingInstruments(false);
+    };
+
+    fetchInstruments();
+  }, []);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -49,9 +57,9 @@ export function AdvisorForm({ instrumentId: initialInstrumentId }: { instrumentI
 
   useEffect(() => {
     if (initialInstrumentId && instruments) {
-        const instrument = instruments.find(i => i.id === initialInstrumentId);
-        // We don't have usage patterns in the main instrument doc anymore.
-        // Let's leave it blank for the user to fill in.
+      const instrument = instruments.find(i => i.id === initialInstrumentId);
+      // We don't have usage patterns in the main instrument doc anymore.
+      // Let's leave it blank for the user to fill in.
     }
   }, [initialInstrumentId, instruments]);
 
@@ -60,45 +68,35 @@ export function AdvisorForm({ instrumentId: initialInstrumentId }: { instrumentI
     setPrediction(null);
     setError(null);
 
-    if (!firestore) {
-        setError('Database connection not available.');
-        setIsLoading(false);
-        return;
-    }
-    
     const instrument = instruments?.find(i => i.id === values.instrumentId);
     if (!instrument) {
       setError('Selected instrument not found.');
       setIsLoading(false);
       return;
     }
-    
+
     // Fetch maintenance history
     let maintenanceHistory = '';
     try {
-        const historyQuery = query(
-            collectionGroup(firestore, 'maintenanceSchedules'), 
-            where('instrumentId', '==', values.instrumentId)
-        );
-        const historySnapshot = await getDocs(historyQuery);
-        const historyRecords: MaintenanceEvent[] = [];
-        historySnapshot.forEach(doc => {
-            historyRecords.push({ id: doc.id, ...doc.data() } as MaintenanceEvent);
-        });
-        
-        maintenanceHistory = historyRecords
-            .map(h => `${h.date} - ${h.type}: ${h.description} (${h.completed ? 'Completed' : 'Pending'}). Notes: ${h.notes || 'N/A'}`)
-            .join('\n');
-    } catch(e) {
-        console.error("Could not fetch maintenance history: ", e);
-        setError("Could not fetch maintenance history for analysis.");
-        // We can still proceed without it
-    }
+      const { data: historyRecords, error } = await supabase
+        .from('maintenanceSchedules')
+        .select('*')
+        .eq('instrumentId', values.instrumentId);
 
+      if (historyRecords) {
+        maintenanceHistory = historyRecords
+          .map(h => `${h.dueDate} - ${h.type}: ${h.description} (${h.status}). Notes: ${h.notes || 'N/A'}`)
+          .join('\n');
+      }
+    } catch (e) {
+      console.error("Could not fetch maintenance history: ", e);
+      setError("Could not fetch maintenance history for analysis.");
+      // We can still proceed without it
+    }
 
     try {
       const result = await predictInstrumentFailure({
-        instrumentName: instrument.name,
+        instrumentName: instrument.eqpId,
         maintenanceHistory,
         usagePatterns: values.usagePatterns,
       });
@@ -109,74 +107,74 @@ export function AdvisorForm({ instrumentId: initialInstrumentId }: { instrumentI
       setIsLoading(false);
     }
   };
-  
+
   const selectedInstrumentId = form.watch('instrumentId');
 
   return (
     <div className="grid md:grid-cols-2 gap-8">
       <Card>
         {isLoadingInstruments ? <Skeleton className="h-full w-full" /> : (
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)}>
-            <CardHeader>
-              <CardTitle className="font-headline">Analyze Instrument</CardTitle>
-              <CardDescription>Select an instrument and describe its usage.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FormField
-                control={form.control}
-                name="instrumentId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Instrument</FormLabel>
-                    <Select onValueChange={(value) => {
-                      field.onChange(value);
-                      // Reset usage patterns on change
-                      form.setValue('usagePatterns', '');
-                    }} defaultValue={field.value}>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)}>
+              <CardHeader>
+                <CardTitle className="font-headline">Analyze Instrument</CardTitle>
+                <CardDescription>Select an instrument and describe its usage.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="instrumentId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Instrument</FormLabel>
+                      <Select onValueChange={(value) => {
+                        field.onChange(value);
+                        // Reset usage patterns on change
+                        form.setValue('usagePatterns', '');
+                      }} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select an instrument" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {instruments?.map((instrument) => (
+                            <SelectItem key={instrument.id} value={instrument.id}>
+                              {instrument.eqpId} ({instrument.serialNumber})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="usagePatterns"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Usage Patterns</FormLabel>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select an instrument" />
-                        </SelectTrigger>
+                        <Textarea
+                          placeholder="e.g., High frequency, 8 hours/day, spinning biological samples."
+                          rows={5}
+                          {...field}
+                        />
                       </FormControl>
-                      <SelectContent>
-                        {instruments?.map((instrument) => (
-                          <SelectItem key={instrument.id} value={instrument.id}>
-                            {instrument.name} ({instrument.serialNumber})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="usagePatterns"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Usage Patterns</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="e.g., High frequency, 8 hours/day, spinning biological samples."
-                        rows={5}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </CardContent>
-            <CardFooter>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bot className="mr-2 h-4 w-4" />}
-                Analyze
-              </Button>
-            </CardFooter>
-          </form>
-        </Form>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </CardContent>
+              <CardFooter>
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bot className="mr-2 h-4 w-4" />}
+                  Analyze
+                </Button>
+              </CardFooter>
+            </form>
+          </Form>
         )}
       </Card>
 
@@ -188,7 +186,7 @@ export function AdvisorForm({ instrumentId: initialInstrumentId }: { instrumentI
         <CardContent className="flex-1 flex items-center justify-center">
           {isLoading && <Loader2 className="h-10 w-10 animate-spin text-primary" />}
           {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-          
+
           {prediction && (
             <div className="space-y-6 w-full animate-in fade-in-50">
               <div>

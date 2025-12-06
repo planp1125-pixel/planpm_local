@@ -1,15 +1,15 @@
 'use client';
 
-import { useDoc, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { doc, collection, query, orderBy } from 'firebase/firestore';
-import type { Instrument, MaintenanceEvent } from '@/lib/types';
+import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '@/lib/supabase';
+import type { Instrument, MaintenanceEvent, MaintenanceResult } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 import Image from 'next/image';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CalendarDays, FlaskConical, Tag, Wrench, ChevronRight, HardDrive } from 'lucide-react';
+import { CalendarDays, FlaskConical, Tag, Wrench, ChevronRight, HardDrive, FileText, ExternalLink } from 'lucide-react';
 import { format, isAfter } from 'date-fns';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import Link from 'next/link';
@@ -29,37 +29,71 @@ function DetailItem({ icon: Icon, label, value }: { icon: React.ElementType, lab
 }
 
 export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: string }) {
-    const firestore = useFirestore();
+    const [instrument, setInstrument] = useState<Instrument | null>(null);
+    const [maintenanceHistory, setMaintenanceHistory] = useState<MaintenanceEvent[]>([]);
+    const [maintenanceResults, setMaintenanceResults] = useState<MaintenanceResult[]>([]);
+    const [isLoadingInstrument, setIsLoadingInstrument] = useState(true);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
-    const instrumentRef = useMemoFirebase(() => {
-        if (!firestore || !instrumentId) return null;
-        return doc(firestore, 'instruments', instrumentId);
-    }, [firestore, instrumentId]);
+    useEffect(() => {
+        const fetchInstrument = async () => {
+            const { data, error } = await supabase.from('instruments').select('*').eq('id', instrumentId).single();
+            if (data) setInstrument(data);
+            setIsLoadingInstrument(false);
+        };
 
-    const { data: instrument, isLoading: isLoadingInstrument } = useDoc<Instrument>(instrumentRef);
-    
-    const maintenanceQuery = useMemoFirebase(() => {
-        if (!firestore || !instrumentId) return null;
-        return query(collection(firestore, 'instruments', instrumentId, 'maintenanceSchedules'), orderBy('dueDate', 'desc'));
-    }, [firestore, instrumentId]);
+        const fetchHistory = async () => {
+            const { data: schedules, error: schedulesError } = await supabase
+                .from('maintenanceSchedules')
+                .select('*')
+                .eq('instrumentId', instrumentId)
+                .order('dueDate', { ascending: false });
 
-    const { data: maintenanceHistory, isLoading: isLoadingHistory } = useCollection<MaintenanceEvent>(maintenanceQuery);
+            if (schedules) setMaintenanceHistory(schedules);
+
+            const { data: results, error: resultsError } = await supabase
+                .from('maintenanceResults')
+                .select('*')
+                .eq('instrumentId', instrumentId);
+
+            if (results) setMaintenanceResults(results);
+
+            setIsLoadingHistory(false);
+        };
+
+        if (instrumentId) {
+            fetchInstrument();
+            fetchHistory();
+        }
+    }, [instrumentId]);
 
     const image = useMemo(() => {
         if (!instrument) return null;
+
+        // Prioritize uploaded image over placeholder
+        if (instrument.imageUrl) {
+            return {
+                imageUrl: instrument.imageUrl,
+                description: instrument.instrumentType || instrument.eqpId,
+                imageHint: ''
+            };
+        }
+
+        // Fallback to placeholder image
         const defaultImage = PlaceHolderImages.find(img => img.id === instrument.imageId);
-        const imageUrl = instrument.imageUrl || defaultImage?.imageUrl;
-        const imageHint = instrument.imageUrl ? '' : defaultImage?.imageHint;
         return {
-            imageUrl,
+            imageUrl: defaultImage?.imageUrl || '',
             description: defaultImage?.description || instrument.instrumentType,
-            imageHint
+            imageHint: defaultImage?.imageHint || ''
         };
     }, [instrument]);
 
-    const nextMaintenanceDate = instrument?.nextMaintenanceDate?.toDate();
+    console.log('Instrument detail - imageUrl:', instrument?.imageUrl);
+    console.log('Instrument detail - image object:', image);
+
+    const nextMaintenanceDate = instrument?.nextMaintenanceDate ? new Date(instrument.nextMaintenanceDate) : null;
     const isOverdue = nextMaintenanceDate && isAfter(new Date(), nextMaintenanceDate);
-    const scheduleDate = instrument?.scheduleDate?.toDate();
+    const scheduleDate = instrument?.scheduleDate ? new Date(instrument.scheduleDate) : null;
 
 
     if (isLoadingInstrument) {
@@ -69,7 +103,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                 <Skeleton className="h-6 w-3/4" />
                 <div className="grid md:grid-cols-3 gap-6">
                     <div className="md:col-span-1 space-y-4">
-                        <Skeleton className="w-full aspect-video rounded-lg"/>
+                        <Skeleton className="w-full aspect-video rounded-lg" />
                         <Skeleton className="h-40 w-full" />
                     </div>
                     <div className="md:col-span-2 space-y-4">
@@ -103,7 +137,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 <h2 className="text-xl font-semibold tracking-tight font-headline">{instrument.eqpId}</h2>
             </div>
-            
+
             <div className="grid md:grid-cols-3 gap-8">
                 <div className="md:col-span-1 space-y-6">
                     <Card>
@@ -137,16 +171,18 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                             <CardTitle className="font-headline text-lg">Details</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-6">
-                             <DetailItem icon={Tag} label="Status" value={<Badge variant={instrument.status === 'Out of Service' ? 'destructive' : 'default'}>{instrument.status}</Badge>} />
-                             <DetailItem icon={HardDrive} label="Model / Serial" value={`${instrument.model} / ${instrument.serialNumber}`} />
-                             <DetailItem icon={Wrench} label="Maintenance Frequency" value={instrument.frequency} />
-                             <DetailItem icon={CalendarDays} label="Schedule Start Date" value={scheduleDate ? scheduleDate.toLocaleDateString() : 'Not set'} />
+                            <DetailItem icon={Tag} label="Maintenance Type" value={<Badge variant="default">{instrument.maintenanceType || 'Not set'}</Badge>} />
+                            <DetailItem icon={Tag} label="Make / Manufacturer" value={instrument.make || 'Not specified'} />
+                            <DetailItem icon={HardDrive} label="Model / Serial" value={`${instrument.model} / ${instrument.serialNumber}`} />
+                            <DetailItem icon={Tag} label="Location" value={instrument.location} />
+                            <DetailItem icon={Wrench} label="Maintenance Frequency" value={instrument.frequency} />
+                            <DetailItem icon={CalendarDays} label="Schedule Start Date" value={scheduleDate ? scheduleDate.toLocaleDateString() : 'Not set'} />
                         </CardContent>
                     </Card>
                 </div>
                 <div className="md:col-span-2 space-y-6">
                     {nextMaintenanceDate && (
-                         <Alert variant={isOverdue ? "destructive" : "default"}>
+                        <Alert variant={isOverdue ? "destructive" : "default"}>
                             <CalendarDays className="h-4 w-4" />
                             <AlertTitle>Next Maintenance Due</AlertTitle>
                             <AlertDescription>
@@ -161,40 +197,77 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                             <CardDescription>Previous maintenance, calibration, and validation records.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                             <Table>
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
-                                    <TableHead>Due Date</TableHead>
-                                    <TableHead>Type</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Description</TableHead>
+                                        <TableHead>Due Date</TableHead>
+                                        <TableHead>Type</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Completed On</TableHead>
+                                        <TableHead>Result</TableHead>
+                                        <TableHead>Document</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {isLoadingHistory ? (
-                                    Array.from({ length: 3 }).map((_, i) => (
-                                        <TableRow key={i}>
-                                        <TableCell><Skeleton className="h-5 w-24"/></TableCell>
-                                        <TableCell><Skeleton className="h-5 w-32"/></TableCell>
-                                        <TableCell><Skeleton className="h-5 w-20"/></TableCell>
-                                        <TableCell><Skeleton className="h-5 w-40"/></TableCell>
-                                        </TableRow>
-                                    ))
+                                        Array.from({ length: 3 }).map((_, i) => (
+                                            <TableRow key={i}>
+                                                <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                                                <TableCell><Skeleton className="h-5 w-32" /></TableCell>
+                                                <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                                                <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                                                <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                                                <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                                            </TableRow>
+                                        ))
                                     ) : maintenanceHistory && maintenanceHistory.length > 0 ? (
-                                    maintenanceHistory.map(event => (
-                                        <TableRow key={event.id}>
-                                            <TableCell>{event.dueDate.toDate().toLocaleDateString()}</TableCell>
-                                            <TableCell><Badge variant="secondary">{event.type}</Badge></TableCell>
-                                            <TableCell>{event.status}</TableCell>
-                                            <TableCell>{event.description}</TableCell>
-                                        </TableRow>
-                                    ))
+                                        maintenanceHistory.map((event: MaintenanceEvent) => {
+                                            const result = maintenanceResults.find(r => r.maintenanceScheduleId === event.id);
+                                            return (
+                                                <TableRow key={event.id}>
+                                                    <TableCell>{new Date(event.dueDate).toLocaleDateString()}</TableCell>
+                                                    <TableCell><Badge variant="secondary">{event.type}</Badge></TableCell>
+                                                    <TableCell>{event.status}</TableCell>
+                                                    <TableCell>
+                                                        {result ? new Date(result.completedDate).toLocaleDateString() :
+                                                            event.completedDate ? new Date(event.completedDate).toLocaleDateString() : '-'}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        {result ? (
+                                                            <div className="flex flex-col gap-1">
+                                                                <Badge variant="outline" className="w-fit capitalize">
+                                                                    {result.resultType.replace('_', ' ')}
+                                                                </Badge>
+                                                                {result.notes && (
+                                                                    <span className="text-xs text-muted-foreground truncate max-w-[150px]" title={result.notes}>
+                                                                        {result.notes}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        ) : '-'}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        {result?.documentUrl ? (
+                                                            <a
+                                                                href={result.documentUrl}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="flex items-center gap-1 text-primary hover:underline text-sm"
+                                                            >
+                                                                <FileText className="w-4 h-4" />
+                                                                View
+                                                            </a>
+                                                        ) : '-'}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })
                                     ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={4} className="text-center h-24">
-                                        No maintenance history found.
-                                        </TableCell>
-                                    </TableRow>
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="text-center h-24">
+                                                No maintenance history found.
+                                            </TableCell>
+                                        </TableRow>
                                     )}
                                 </TableBody>
                             </Table>

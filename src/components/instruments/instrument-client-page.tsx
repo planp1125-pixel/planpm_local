@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   flexRender,
   getCoreRowModel,
@@ -24,8 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Instrument } from '@/lib/types';
 import { columns as createColumns } from './columns';
-import { useCollection, useFirestore, useMemoFirebase, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, doc } from 'firebase/firestore';
+import { supabase } from '@/lib/supabase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AddInstrumentDialog } from './add-instrument-dialog';
 import { EditInstrumentDialog } from './edit-instrument-dialog';
@@ -40,34 +39,51 @@ export function InstrumentClientPage() {
   const [deletingInstrument, setDeletingInstrument] = useState<Instrument | null>(null);
   const { toast } = useToast();
 
-  const firestore = useFirestore();
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const instrumentsQuery = useMemoFirebase(() => {
-    if (!firestore) return null;
-    return collection(firestore, 'instruments');
-  }, [firestore]);
+  const fetchInstruments = async () => {
+    const { data, error } = await supabase.from('instruments').select('*');
+    if (error) {
+      console.error('Error fetching instruments:', error);
+    } else {
+      setInstruments(data || []);
+    }
+    setIsLoading(false);
+  };
 
-  const { data: instruments, isLoading } = useCollection<Instrument>(instrumentsQuery);
-  
+  useEffect(() => {
+    fetchInstruments();
+  }, []);
+
   const handleEdit = (instrument: Instrument) => {
     setEditingInstrument(instrument);
   };
-  
+
   const handleDelete = (instrument: Instrument) => {
     setDeletingInstrument(instrument);
   };
 
-  const confirmDelete = () => {
-    if (!deletingInstrument || !firestore) return;
-    
-    const instrumentDocRef = doc(firestore, 'instruments', deletingInstrument.id);
-    deleteDocumentNonBlocking(instrumentDocRef);
+  const confirmDelete = async () => {
+    if (!deletingInstrument) return;
 
-    toast({
-      title: 'Instrument Deleted',
-      description: `${deletingInstrument.eqpId} has been removed from the inventory.`,
-      variant: 'destructive',
-    });
+    const { error } = await supabase.from('instruments').delete().eq('id', deletingInstrument.id);
+
+    if (error) {
+      console.error('Error deleting instrument:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete instrument.',
+        variant: 'destructive',
+      });
+    } else {
+      setInstruments(prev => prev.filter(i => i.id !== deletingInstrument.id));
+      toast({
+        title: 'Instrument Deleted',
+        description: `${deletingInstrument.eqpId} has been removed from the inventory.`,
+        variant: 'destructive',
+      });
+    }
     setDeletingInstrument(null);
   };
 
@@ -99,8 +115,8 @@ export function InstrumentClientPage() {
         />
         <Button onClick={() => setAddDialogOpen(true)}>Add Instrument</Button>
       </div>
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border w-full overflow-x-auto">
+        <Table className="min-w-full">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -165,16 +181,17 @@ export function InstrumentClientPage() {
           Next
         </Button>
       </div>
-      <AddInstrumentDialog isOpen={isAddDialogOpen} onOpenChange={setAddDialogOpen} />
+      <AddInstrumentDialog isOpen={isAddDialogOpen} onOpenChange={setAddDialogOpen} onSuccess={fetchInstruments} />
       {editingInstrument && (
-        <EditInstrumentDialog 
-          isOpen={!!editingInstrument} 
+        <EditInstrumentDialog
+          isOpen={!!editingInstrument}
           onOpenChange={(isOpen) => {
             if (!isOpen) {
               setEditingInstrument(null);
             }
-          }} 
+          }}
           instrument={editingInstrument}
+          onSuccess={fetchInstruments}
         />
       )}
       {deletingInstrument && (

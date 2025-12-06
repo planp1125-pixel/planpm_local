@@ -19,8 +19,8 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem"
-const SIDEBAR_WIDTH_MOBILE = "18rem"
+const SIDEBAR_WIDTH = "14rem"
+const SIDEBAR_WIDTH_MOBILE = "16rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContext = {
@@ -167,7 +167,7 @@ const Sidebar = React.forwardRef<
     ref
   ) => {
     const { isMobile, state, openMobile, setOpenMobile, open } = useSidebar()
-    
+
     if (isMobile) {
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
@@ -226,7 +226,7 @@ const SidebarFooter = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div">
 >(({ className, ...props }, ref) => {
-    const { open } = useSidebar();
+  const { open } = useSidebar();
   return (
     <div
       ref={ref}
@@ -242,15 +242,15 @@ const SidebarMenu = React.forwardRef<
   HTMLUListElement,
   React.ComponentProps<"ul">
 >(({ className, ...props }, ref) => {
-    const { open } = useSidebar();
-    return (
-        <ul
-            ref={ref}
-            data-sidebar="menu"
-            className={cn("flex w-full min-w-0 flex-col gap-2", open ? "p-4" : "p-2 items-center", className)}
-            {...props}
-        />
-    )
+  const { open } = useSidebar();
+  return (
+    <ul
+      ref={ref}
+      data-sidebar="menu"
+      className={cn("flex w-full min-w-0 flex-col gap-2", open ? "p-4" : "p-2 items-center", className)}
+      {...props}
+    />
+  )
 })
 SidebarMenu.displayName = "SidebarMenu"
 
@@ -317,7 +317,7 @@ const SidebarMenuButton = React.forwardRef<
     if (!tooltip || open) {
       return button
     }
-    
+
     return (
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
