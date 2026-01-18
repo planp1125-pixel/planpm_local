@@ -347,3 +347,9 @@ Your MVP is now deployed and ready for beta users!
 5. Don't add payments until users love it!
 
 **Good luck with your launch! 🚀**
+
+** On Windows, run:
+git clone https://github.com/planp1125-pixel/planpm_local.git
+cd planpm_local
+copy env.docker.example .env
+docker-compose -f docker-compose.dev.yml up --build

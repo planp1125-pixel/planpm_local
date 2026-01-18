@@ -4,7 +4,7 @@ import { MaintenanceCompletionChart } from '@/components/dashboard/maintenance-c
 import { MaintenanceSummary } from '@/components/dashboard/maintenance-summary';
 import { Suspense } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AdvisorFloatingWidget } from '@/components/advisor/advisor-floating-widget';
+// import { AdvisorFloatingWidget } from '@/components/advisor/advisor-floating-widget';
 
 export default function DashboardPage() {
   return (
@@ -24,9 +24,9 @@ export default function DashboardPage() {
         <Suspense fallback={<Skeleton className="h-[300px]" />}>
           <UpcomingMaintenanceList />
         </Suspense>
-        
+
       </div>
-      <AdvisorFloatingWidget />
+      {/* <AdvisorFloatingWidget /> */}
     </div>
   );
 }
