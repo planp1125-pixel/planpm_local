@@ -129,18 +129,32 @@ export function UpcomingMaintenanceList() {
       instruments?.forEach(i => instMap[i.id] = i);
       setInstrumentsMap(instMap);
 
-      // 2. Fetch Maintenance Configurations
+      // 2. Fetch Maintenance Configurations (for frequency info)
       const { data: configs } = await supabase.from('maintenance_configurations').select('*');
+      const configMap = new Map<string, MaintenanceConfiguration>();
+      configs?.forEach(c => {
+        const key = `${c.instrument_id}_${c.maintenance_type}`;
+        configMap.set(key, c);
+      });
 
-      // 3. Fetch Active/History Schedules
-      const { data: schedules } = await supabase.from('maintenanceSchedules').select('*');
+      // 3. Fetch ALL schedules from DB (no virtual generation)
+      const { data: schedules, error: scheduleError } = await supabase
+        .from('maintenanceSchedules')
+        .select('*')
+        .gte('dueDate', startDate.toISOString())
+        .lte('dueDate', futureDate.toISOString())
+        .order('dueDate', { ascending: true });
+
+      if (scheduleError) {
+        console.error('Error fetching schedules:', scheduleError);
+      }
 
       // 4. Fetch Results (for status calculation)
       const { data: results } = await supabase.from('maintenanceResults').select('*');
 
       const combinedEvents: EnhancedEvent[] = [];
 
-      // Helper to determine status (same as before)
+      // Helper to determine status
       const getMaintenanceStatus = (schedule: MaintenanceEvent): { status: MaintenanceStatus; totalSections: number; completedSections: number; hasResult: boolean } => {
         const result = results?.find(r => r.maintenanceScheduleId === schedule.id);
         if (!result) {
@@ -152,10 +166,7 @@ export function UpcomingMaintenanceList() {
         if (testData && Array.isArray(testData) && testData.length > 0) {
           const totalSections = testData.length;
           const completedSections = testData.filter(section => {
-            // Check if section has rows and they are not empty
             if (!section.rows || section.rows.length === 0) return true;
-
-            // Check if all rows in the section are complete
             const allRowsComplete = section.rows.every((row: any) => {
               if (section.type === 'checklist') {
                 return row.passed === true;
@@ -163,160 +174,48 @@ export function UpcomingMaintenanceList() {
                 return row.measured !== undefined && row.measured !== null && row.measured !== '';
               }
             });
-
             return allRowsComplete;
           }).length;
-
-          console.log('DEBUG Status Calculation:', {
-            scheduleId: schedule.id,
-            totalSections,
-            completedSections,
-            scheduleStatus: schedule.status,
-            testData: JSON.stringify(testData, null, 2)
-          });
 
           if (completedSections === 0) return { status: 'Pending', totalSections, completedSections, hasResult: true };
           if (completedSections < totalSections) return { status: 'Partially Completed', totalSections, completedSections, hasResult: true };
           return { status: 'Completed', totalSections, completedSections, hasResult: true };
         }
 
-        // Result exists but no test data: treat as partial unless schedule is marked completed
         if (schedule.status === 'Completed') {
           return { status: 'Completed', totalSections: 0, completedSections: 0, hasResult: true };
         }
         return { status: 'Partially Completed', totalSections: 0, completedSections: 0, hasResult: true };
       };
 
-      if (configs && instruments) {
-        console.log('DEBUG: Fetched Configs:', configs); // DEBUG LOG
-        configs.forEach((config: MaintenanceConfiguration) => {
-          // Find any EXISTING open schedule for this config (approx match on type/instrument)
-          // Map any potential snake_case to camelCase for consistency
-          const existingSchedules = schedules?.map(s => ({
-            ...s,
-            templateId: s.templateId || (s as any).template_id,
-            maintenanceBy: (s as any).maintenanceBy || (s as any).maintenance_by,
-            vendorName: (s as any).vendorName || (s as any).vendor_name,
-            vendorContact: (s as any).vendorContact || (s as any).vendor_contact,
-          })).filter(s =>
-            s.instrumentId === config.instrument_id &&
-            s.type === config.maintenance_type
-          ) || [];
+      // Process DB schedules only - NO VIRTUAL SCHEDULES
+      if (schedules) {
+        console.log('DEBUG: Fetched DB Schedules:', schedules.length);
 
-          const existingDueDates = new Set<number>(existingSchedules.map(s => new Date(s.dueDate).getTime()));
+        schedules.forEach((schedule) => {
+          const { status, totalSections, completedSections, hasResult } = getMaintenanceStatus(schedule as any);
 
-          // Sort by date desc
-          existingSchedules.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+          // Get config for frequency info
+          const configKey = `${schedule.instrumentId}_${schedule.type}`;
+          const config = configMap.get(configKey);
 
-          // Get the most recent schedule (could be open or completed)
-          const latestSchedule = existingSchedules[0];
-
-          if (latestSchedule) {
-            const templateIdToUse = config.template_id || (config as any).templateId || latestSchedule.templateId;
-
-            // Add all real schedules in the selected window so completed history stays visible
-            existingSchedules.forEach(schedule => {
-              const dueTime = new Date(schedule.dueDate).getTime();
-              if (dueTime < startDate.getTime() || dueTime > futureDate.getTime()) return;
-
-              const { status, totalSections, completedSections, hasResult } = getMaintenanceStatus(schedule as any);
-
-              combinedEvents.push({
-                ...schedule,
-                maintenanceStatus: status,
-                totalSections,
-                completedSections,
-                hasResult,
-                templateId: templateIdToUse, // Ensure template ID is passed
-                frequency: config.frequency,
-                maintenanceBy: schedule.maintenanceBy || (config as any).maintenanceBy || (config as any).maintenance_by,
-                vendorName: schedule.vendorName || (config as any).vendorName || (config as any).vendor_name || instMap[config.instrument_id]?.vendorName || null,
-                vendorContact: schedule.vendorContact || (config as any).vendorContact || (config as any).vendor_contact || instMap[config.instrument_id]?.vendorContact || null,
-              });
-            });
-
-            // Continue generating upcoming occurrences after the latest real schedule
-            const maxOccurrences = getMaxOccurrences(timeRange, config.frequency);
-            const anchorDate = latestSchedule.completedDate
-              ? new Date(latestSchedule.completedDate)
-              : new Date(latestSchedule.dueDate);
-            let currentDue = getNextDate(anchorDate, config.frequency);
-            let occurrenceCount = 0;
-
-            while (currentDue <= futureDate && occurrenceCount < maxOccurrences) {
-              const dueTimestamp = currentDue.getTime();
-              if (!existingDueDates.has(dueTimestamp)) {
-                const isPastDue = currentDue < new Date();
-                combinedEvents.push({
-                  id: `virtual-${config.id}-${currentDue.getTime()}`,
-                  instrumentId: config.instrument_id,
-                  dueDate: currentDue.toISOString(),
-                  type: config.maintenance_type as any,
-                  description: `Scheduled ${config.maintenance_type}`,
-                  status: 'Scheduled',
-                  maintenanceStatus: isPastDue ? 'Overdue' : 'Pending',
-                  hasResult: false,
-                  templateId: templateIdToUse,
-                  frequency: config.frequency,
-                  maintenanceBy: latestSchedule.maintenanceBy || (config as any).maintenanceBy || (config as any).maintenance_by,
-                  vendorName: latestSchedule.vendorName || (config as any).vendorName || (config as any).vendor_name || instMap[config.instrument_id]?.vendorName || null,
-                  vendorContact: latestSchedule.vendorContact || (config as any).vendorContact || (config as any).vendor_contact || instMap[config.instrument_id]?.vendorContact || null,
-                });
-                existingDueDates.add(dueTimestamp);
-              }
-
-              currentDue = getNextDate(currentDue, config.frequency);
-              occurrenceCount++;
-            }
-          } else {
-            // No schedule exists yet, generate MULTIPLE future occurrences within time range
-            const lastCompleted = existingSchedules.find(s => s.status === 'Completed');
-            let currentDue = new Date(config.schedule_date); // Start from base schedule date
-
-            if (lastCompleted && lastCompleted.completedDate) {
-              // Calculate next due date from last completion
-              currentDue = getNextDate(new Date(lastCompleted.completedDate), config.frequency);
-            } else if (new Date(config.schedule_date) < new Date() && !lastCompleted) {
-              // If schedule date is in the past and no completion, use schedule date
-              currentDue = new Date(config.schedule_date);
-            } else {
-              // Otherwise use the configured schedule date
-              currentDue = new Date(config.schedule_date);
-            }
-
-            // Generate multiple occurrences within the time range
-            let occurrenceCount = 0;
-            const maxOccurrences = getMaxOccurrences(timeRange, config.frequency);
-
-            while (currentDue <= futureDate && occurrenceCount < maxOccurrences) {
-              const isPastDue = currentDue < new Date();
-              const templateIdToUse = (config as any).templateId || config.template_id;
-              console.log(`DEBUG: Virtual Event ${config.id}, Occurrence ${occurrenceCount + 1}, TemplateID: ${templateIdToUse}`); // DEBUG
-
-              combinedEvents.push({
-                id: `virtual-${config.id}-${currentDue.getTime()}`,
-                instrumentId: config.instrument_id,
-                dueDate: currentDue.toISOString(),
-                type: config.maintenance_type as any,
-                description: `Scheduled ${config.maintenance_type}`,
-                status: 'Scheduled',
-                maintenanceStatus: isPastDue ? 'Overdue' : 'Pending',
-                hasResult: false,
-                templateId: templateIdToUse,
-                frequency: config.frequency,
-                maintenanceBy: (config as any).maintenanceBy || (config as any).maintenance_by,
-                vendorName: (config as any).vendorName || (config as any).vendor_name || instMap[config.instrument_id]?.vendorName || null,
-                vendorContact: (config as any).vendorContact || (config as any).vendor_contact || instMap[config.instrument_id]?.vendorContact || null,
-              });
-
-              // Move to next occurrence
-              currentDue = getNextDate(currentDue, config.frequency);
-              occurrenceCount++;
-            }
-          }
+          combinedEvents.push({
+            ...schedule,
+            maintenanceStatus: status,
+            totalSections,
+            completedSections,
+            hasResult,
+            templateId: schedule.template_id || schedule.templateId,
+            frequency: config?.frequency || 'Monthly',
+            maintenanceBy: schedule.maintenanceBy || config?.maintenanceBy || 'internal',
+            vendorName: schedule.vendorName || config?.vendorName || null,
+            vendorContact: schedule.vendorContact || config?.vendorContact || null,
+          });
         });
       }
-      console.log('DEBUG: Combined Events:', combinedEvents); // DEBUG LOG
+
+      console.log('DEBUG: Combined Events (DB only):', combinedEvents.length);
+      // DEBUG LOG
 
       // Deduplicate by instrument + type + day, prefer real schedules over virtual
       const normalizeDay = (dateStr: string) => {

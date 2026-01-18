@@ -1,0 +1,148 @@
+# Docker Compose for Plan-PM Development
+# Includes: Next.js App + Supabase (DB, Auth, Storage, etc.)
+
+services:
+  # ============================================
+  # NEXT.JS APPLICATION
+  # ============================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: planpm_app
+    ports:
+      - "9002:9002"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      # Mount source code for hot-reload
+      - .:/app
+      # Don't mount node_modules (use container's version)
+      - /app/node_modules
+      # Don't mount .next build cache (use container's version)
+      - /app/.next
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - planpm_network
+
+  # ============================================
+  # SUPABASE DATABASE (PostgreSQL)
+  # ============================================
+  supabase-db:
+    image: supabase/postgres:15.1.1.78
+    container_name: planpm_supabase_db
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      JWT_EXP: 604800
+    volumes:
+      - supabase_db_data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d/migrations
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - planpm_network
+
+  # ============================================
+  # SUPABASE AUTH
+  # ============================================
+  supabase-auth:
+    image: supabase/gotrue:v2.151.0
+    container_name: planpm_supabase_auth
+    ports:
+      - "54321:9999"
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:54321
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:postgres@supabase-db:5432/postgres
+      GOTRUE_SITE_URL: http://localhost:9002
+      GOTRUE_URI_ALLOW_LIST: http://localhost:9002
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      GOTRUE_JWT_EXP: 604800
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_LOG_LEVEL: DEBUG
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - planpm_network
+
+  # ============================================
+  # SUPABASE REST API (PostgREST)
+  # ============================================
+  supabase-rest:
+    image: postgrest/postgrest:v12.0.2
+    container_name: planpm_supabase_rest
+    ports:
+      - "54323:3000"
+    environment:
+      PGRST_DB_URI: postgres://authenticator:postgres@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - planpm_network
+
+  # ============================================
+  # SUPABASE STORAGE
+  # ============================================
+  supabase-storage:
+    image: supabase/storage-api:v0.46.4
+    container_name: planpm_supabase_storage
+    ports:
+      - "54324:5000"
+    environment:
+      ANON_KEY: ${SUPABASE_ANON_KEY}
+      SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://supabase-rest:3000
+      PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      DATABASE_URL: postgres://supabase_storage_admin:postgres@supabase-db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+    volumes:
+      - supabase_storage_data:/var/lib/storage
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      supabase-rest:
+        condition: service_started
+    networks:
+      - planpm_network
+
+# ============================================
+# VOLUMES & NETWORKS
+# ============================================
+volumes:
+  supabase_db_data:
+    driver: local
+  supabase_storage_data:
+    driver: local
+
+networks:
+  planpm_network:
+    driver: bridge

@@ -32,6 +32,7 @@ import { useMaintenanceTypes } from '@/hooks/use-maintenance-types';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 import { useAuth } from '@/contexts/auth-context';
 import { DatePicker } from '@/components/ui/date-picker';
+import { generateYearSchedules } from '@/lib/schedule-generator';
 
 const frequencies: MaintenanceFrequency[] = ['Daily', 'Weekly', 'Monthly', '3 Months', '6 Months', '1 Year'];
 
@@ -229,11 +230,35 @@ export function AddInstrumentDialog({ isOpen, onOpenChange, onSuccess }: AddInst
         vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,
       }));
 
-      const { error: configError } = await supabase.from('maintenance_configurations').insert(scheduleInserts);
+      const { data: configData, error: configError } = await supabase
+        .from('maintenance_configurations')
+        .insert(scheduleInserts)
+        .select();
 
       if (configError) {
         console.error('Config insert error:', configError);
         toast({ title: 'Warning', description: 'Instrument added but failed to save schedules detailed config.' });
+      } else if (configData) {
+        // Generate 1 year of actual maintenanceSchedules for each configuration
+        let totalSchedulesGenerated = 0;
+        for (const config of configData) {
+          const result = await generateYearSchedules({
+            id: config.id,
+            instrument_id: config.instrument_id,
+            maintenance_type: config.maintenance_type,
+            frequency: config.frequency,
+            schedule_date: config.schedule_date,
+            template_id: config.template_id,
+            user_id: user?.id,
+            maintenanceBy: config.maintenanceBy || config.maintenance_by,
+            vendorName: config.vendorName || config.vendor_name,
+            vendorContact: config.vendorContact || config.vendor_contact,
+          });
+          if (result.success) {
+            totalSchedulesGenerated += result.count;
+          }
+        }
+        console.log(`Generated ${totalSchedulesGenerated} schedules for ${configData.length} configurations`);
       }
 
       // Ensure types exist

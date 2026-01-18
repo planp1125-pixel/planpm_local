@@ -53,7 +53,8 @@ export default function UserManagementPage() {
             return;
         }
         fetchUsers();
-    }, [hasPermission, router]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const fetchUsers = async () => {
         setIsLoading(true);

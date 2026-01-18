@@ -33,6 +33,7 @@ import { useMaintenanceTypes } from '@/hooks/use-maintenance-types';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { regenerateSchedules, generateYearSchedules } from '@/lib/schedule-generator';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -305,12 +306,33 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
 
             // Handle Schedules (Configurations)
             // 1. Get existing configs IDs to know what to keep/delete
-            // Handle Schedules (Configurations)
-            // 1. Get existing configs IDs to know what to keep/delete
             const keptConfigIds = values.schedules.map(s => s.id).filter(Boolean);
 
-            // Delete removed configurations (or all if keptConfigIds is empty)
-            // Delete removed configurations (or all if keptConfigIds is empty)
+            // 2. Get configs that will be deleted (to also delete their schedules)
+            const { data: configsToDelete } = await supabase
+                .from('maintenance_configurations')
+                .select('id, maintenance_type')
+                .eq('instrument_id', instrumentId)
+                .not('id', 'in', keptConfigIds.length > 0 ? `(${keptConfigIds.join(',')})` : '()');
+
+            // 3. Delete maintenanceSchedules for removed configurations
+            if (configsToDelete && configsToDelete.length > 0) {
+                for (const config of configsToDelete) {
+                    const { error: scheduleDeleteError } = await supabase
+                        .from('maintenanceSchedules')
+                        .delete()
+                        .eq('instrumentId', instrumentId)
+                        .eq('type', config.maintenance_type);
+
+                    if (scheduleDeleteError) {
+                        console.error('Error deleting schedules for config:', config.id, scheduleDeleteError);
+                    } else {
+                        console.log(`Deleted schedules for removed config: ${config.maintenance_type}`);
+                    }
+                }
+            }
+
+            // 4. Delete removed configurations
             let deleteQuery = supabase
                 .from('maintenance_configurations')
                 .delete()
@@ -322,7 +344,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
 
             const { error: deleteError } = await deleteQuery;
             if (deleteError) {
-                console.error('Error deleting schedules:', JSON.stringify(deleteError));
+                console.error('Error deleting configs:', JSON.stringify(deleteError));
                 throw deleteError;
             }
 
@@ -344,9 +366,9 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                         console.error('Error updating schedule:', JSON.stringify(updateError), schedule);
                         throw updateError;
                     }
-                } else {
-                    // Insert
-                    const { error: insertError } = await supabase.from('maintenance_configurations').insert({
+
+                    // Delete pending schedules and regenerate with new frequency
+                    const regenResult = await regenerateSchedules({
                         instrument_id: instrumentId,
                         maintenance_type: schedule.maintenanceType,
                         frequency: schedule.frequency,
@@ -357,9 +379,44 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                         vendorName: schedule.maintenanceBy === 'vendor' ? schedule.vendorName || '' : null,
                         vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,
                     });
+                    console.log(`Deleted ${regenResult.deleted} pending schedules, created ${regenResult.created} new schedules`);
+                } else {
+                    // Insert new configuration and generate 1 year of schedules
+                    const { data: insertedConfig, error: insertError } = await supabase
+                        .from('maintenance_configurations')
+                        .insert({
+                            instrument_id: instrumentId,
+                            maintenance_type: schedule.maintenanceType,
+                            frequency: schedule.frequency,
+                            schedule_date: schedule.scheduleDate.toISOString(),
+                            template_id: schedule.templateId || null,
+                            user_id: user?.id,
+                            maintenanceBy: schedule.maintenanceBy,
+                            vendorName: schedule.maintenanceBy === 'vendor' ? schedule.vendorName || '' : null,
+                            vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,
+                        })
+                        .select()
+                        .single();
                     if (insertError) {
                         console.error('Error inserting schedule:', JSON.stringify(insertError), schedule);
                         throw insertError;
+                    }
+
+                    // Generate 1 year of schedules for the new configuration
+                    if (insertedConfig) {
+                        const genResult = await generateYearSchedules({
+                            id: insertedConfig.id,
+                            instrument_id: instrumentId,
+                            maintenance_type: schedule.maintenanceType,
+                            frequency: schedule.frequency,
+                            schedule_date: schedule.scheduleDate.toISOString(),
+                            template_id: schedule.templateId || null,
+                            user_id: user?.id,
+                            maintenanceBy: schedule.maintenanceBy,
+                            vendorName: schedule.maintenanceBy === 'vendor' ? schedule.vendorName || '' : null,
+                            vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,
+                        });
+                        console.log(`Generated ${genResult.count} schedules for new configuration`);
                     }
                 }
             }

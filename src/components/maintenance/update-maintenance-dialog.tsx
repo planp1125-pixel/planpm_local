@@ -43,6 +43,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/auth-context';
+import { checkAndRegenerateSchedules } from '@/lib/schedule-generator';
 
 const formSchema = z.object({
     completedDate: z.date({
@@ -599,6 +600,14 @@ export function UpdateMaintenanceDialog({
                 })
                 .eq('id', maintenanceEvent.id);
 
+            // Auto-regenerate next year's schedules if this was the last one
+            if (allComplete) {
+                const regenResult = await checkAndRegenerateSchedules(maintenanceEvent.id);
+                if (regenResult.regenerated) {
+                    console.log(`Auto-generated ${regenResult.count} new schedules for next year`);
+                }
+            }
+
             toast({
                 title: 'Result Updated',
                 description: allComplete ? 'Maintenance result completed.' : 'Partial result saved. You can continue later.',
@@ -632,8 +641,8 @@ export function UpdateMaintenanceDialog({
                         <div className="flex-1">
                             <DialogTitle className="flex items-center gap-2 flex-wrap">
                                 {viewMode || isCompleteResult ? 'View Maintenance Result' :
-                                 existingResult && !isCompleteResult ? 'Continue Partial Result' :
-                                 'Update Maintenance Result'}
+                                    existingResult && !isCompleteResult ? 'Continue Partial Result' :
+                                        'Update Maintenance Result'}
                                 {instrumentInfo && (
                                     <Badge variant="outline" className="font-mono text-base px-3 py-1">
                                         {instrumentInfo.eqpId}
@@ -777,10 +786,10 @@ export function UpdateMaintenanceDialog({
                                                 </div>
                                             </CardHeader>
                                             <CardContent className="space-y-3">
-                                                        {section.type === 'checklist' ? (
-                                                            <div className="space-y-2">
-                                                                {section.rows.map((row, rowIndex) => (
-                                                                    <label key={row.id} className="flex items-center gap-3 p-2 border rounded">
+                                                {section.type === 'checklist' ? (
+                                                    <div className="space-y-2">
+                                                        {section.rows.map((row, rowIndex) => (
+                                                            <label key={row.id} className="flex items-center gap-3 p-2 border rounded">
                                                                 <input
                                                                     type="checkbox"
                                                                     className="h-4 w-4"
@@ -788,11 +797,11 @@ export function UpdateMaintenanceDialog({
                                                                     onChange={(e) => handleChecklistToggle(sectionIndex, rowIndex, e.target.checked)}
                                                                     disabled={viewMode || isCompleteResult}
                                                                 />
-                                                                        <span className="text-sm">{row.label}</span>
-                                                                    </label>
-                                                                ))}
-                                                            </div>
-                                                        ) : (
+                                                                <span className="text-sm">{row.label}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                ) : (
                                                     <>
                                                         {/* Column Headers */}
                                                         <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground px-1">

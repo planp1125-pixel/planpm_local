@@ -17,14 +17,48 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
+        let isMounted = true;
+
+        // Get initial session immediately
+        const getInitialSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (isMounted) {
+                    setUser(session?.user ?? null);
+                    setIsLoading(false);
+                }
+            } catch (err) {
+                console.error('Error getting initial session:', err);
+                if (isMounted) {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        getInitialSession();
+
+        // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            setUser(session?.user ?? null);
-            setIsLoading(false);
+            if (isMounted) {
+                setUser(session?.user ?? null);
+                // Loading should already be false from initial session
+            }
         });
 
+        // Fallback: ensure loading is false after 5 seconds max
+        const fallback = setTimeout(() => {
+            if (isMounted && isLoading) {
+                console.warn('[SupabaseProvider] Fallback timeout - forcing loading to false');
+                setIsLoading(false);
+            }
+        }, 5000);
+
         return () => {
+            isMounted = false;
+            clearTimeout(fallback);
             subscription.unsubscribe();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return (
