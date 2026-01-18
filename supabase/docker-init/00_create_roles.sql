@@ -2,7 +2,7 @@
 -- Create Supabase roles that don't exist in standalone PostgreSQL image
 -- This must run BEFORE the tables are created
 
--- Create roles if they don't exist
+-- Create roles if they don't exist (with passwords)
 DO $$
 BEGIN
     -- anon role (for unauthenticated users)
@@ -25,7 +25,7 @@ BEGIN
         CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS;
     END IF;
     
-    -- authenticator (used by PostgREST)
+    -- authenticator (used by PostgREST) - needs LOGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticator') THEN
         CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD 'postgres';
         GRANT anon TO authenticator;
@@ -33,15 +33,14 @@ BEGIN
         GRANT service_role TO authenticator;
     END IF;
     
-    -- supabase_auth_admin (for auth schema)
+    -- supabase_auth_admin (for auth schema) - needs LOGIN with password
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-        CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT CREATEROLE CREATEDB;
-        GRANT ALL ON DATABASE postgres TO supabase_auth_admin;
+        CREATE ROLE supabase_auth_admin LOGIN PASSWORD 'postgres' NOINHERIT CREATEROLE CREATEDB;
     END IF;
     
-    -- supabase_storage_admin (for storage)
+    -- supabase_storage_admin (for storage) - needs LOGIN with password
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_storage_admin') THEN
-        CREATE ROLE supabase_storage_admin NOLOGIN NOINHERIT;
+        CREATE ROLE supabase_storage_admin LOGIN PASSWORD 'postgres' NOINHERIT;
     END IF;
 END
 $$;
@@ -52,16 +51,24 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
 
+-- Grant to admin roles as well
+GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
+
 -- Set default privileges for future objects
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
 
--- Create auth schema if it doesn't exist
+-- Create auth schema if it doesn't exist and grant permissions
 CREATE SCHEMA IF NOT EXISTS auth;
+GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 
--- Grant auth schema permissions
-GRANT USAGE ON SCHEMA auth TO supabase_auth_admin, service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin, service_role;
+-- Create storage schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS storage;
+GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
+GRANT USAGE ON SCHEMA storage TO authenticated, anon, service_role;
 
 SELECT 'Roles created successfully!' as status;
