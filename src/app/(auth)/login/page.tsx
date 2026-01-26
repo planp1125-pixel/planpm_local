@@ -15,9 +15,6 @@ import { useToast } from '@/hooks/use-toast';
 
 import { Separator } from '@/components/ui/separator';
 
-// Check if running against cloud Supabase
-const isCloudDeployment = process.env.NEXT_PUBLIC_SUPABASE_URL?.includes('supabase.co');
-
 export default function LoginPage() {
     const { signInWithEmail, signInWithGoogle, isLoading: authLoading, session } = useAuth();
     const router = useRouter();
@@ -27,9 +24,18 @@ export default function LoginPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
     const [isLookingUpRole, setIsLookingUpRole] = useState(false);
+    const [isCloudDeployment, setIsCloudDeployment] = useState(false);
     const { toast } = useToast();
 
-    // Redirect if already logged in
+    // Detect cloud deployment on client side
+    useEffect(() => {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const isCloud = supabaseUrl.includes('supabase.co');
+        console.log('[Login] Supabase URL:', supabaseUrl, 'Is Cloud:', isCloud);
+        setIsCloudDeployment(isCloud);
+    }, []);
+
+    // Redirect if already logged in for cloud deployment
     useEffect(() => {
         if (!authLoading && session) {
             router.push('/');
