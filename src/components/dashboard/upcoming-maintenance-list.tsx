@@ -116,7 +116,7 @@ export function UpcomingMaintenanceList() {
     instrumentType: [],
   });
 
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
 
   const fetchUpcoming = async () => {
     setIsLoading(true);
@@ -266,8 +266,12 @@ export function UpcomingMaintenanceList() {
   };
 
   useEffect(() => {
+    // Wait for auth to complete before fetching data
+    if (authLoading) {
+      return;
+    }
     fetchUpcoming();
-  }, [timeRange]);
+  }, [timeRange, authLoading]);
 
   const handleUpdateClick = async (event: MaintenanceEvent) => {
     if (event.id.startsWith('virtual-')) {
