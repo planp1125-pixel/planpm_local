@@ -107,7 +107,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange, onSuccess }: AddInst
   const [templates, setTemplates] = useState<TestTemplate[]>([]);
 
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, orgId } = useAuth();
   const { instrumentTypes, addInstrumentType, isLoading: isLoadingTypes } = useInstrumentTypes();
   const { maintenanceTypes, addMaintenanceType, isLoading: isLoadingMaintTypes } = useMaintenanceTypes();
 
@@ -250,6 +250,7 @@ export function AddInstrumentDialog({ isOpen, onOpenChange, onSuccess }: AddInst
             schedule_date: config.schedule_date,
             template_id: config.template_id,
             user_id: user?.id,
+            org_id: orgId,
             maintenanceBy: config.maintenanceBy || config.maintenance_by,
             vendorName: config.vendorName || config.vendor_name,
             vendorContact: config.vendorContact || config.vendor_contact,

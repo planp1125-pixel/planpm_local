@@ -126,7 +126,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
     const { maintenanceTypes, addMaintenanceType, isLoading: isLoadingMaintTypes } = useMaintenanceTypes();
     const router = useRouter();
     const { toast } = useToast();
-    const { user } = useAuth();
+    const { user, orgId } = useAuth();
 
     const form = useForm<FormValues>({
         resolver: zodResolver(formSchema),
@@ -375,6 +375,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                         schedule_date: schedule.scheduleDate.toISOString(),
                         template_id: schedule.templateId || null,
                         user_id: user?.id,
+                        org_id: orgId,
                         maintenanceBy: schedule.maintenanceBy,
                         vendorName: schedule.maintenanceBy === 'vendor' ? schedule.vendorName || '' : null,
                         vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,
@@ -412,6 +413,7 @@ export function InstrumentDetailClientPage({ instrumentId }: { instrumentId: str
                             schedule_date: schedule.scheduleDate.toISOString(),
                             template_id: schedule.templateId || null,
                             user_id: user?.id,
+                            org_id: orgId,
                             maintenanceBy: schedule.maintenanceBy,
                             vendorName: schedule.maintenanceBy === 'vendor' ? schedule.vendorName || '' : null,
                             vendorContact: schedule.maintenanceBy === 'vendor' ? schedule.vendorContact || '' : null,

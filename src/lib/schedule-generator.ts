@@ -64,6 +64,7 @@ export async function generateYearSchedules(config: {
     schedule_date: string;
     template_id?: string | null;
     user_id?: string;
+    org_id?: string | null;
     maintenanceBy?: string;
     vendorName?: string | null;
     vendorContact?: string | null;
@@ -123,6 +124,7 @@ export async function generateYearSchedules(config: {
             status: 'Scheduled',
             template_id: config.template_id || null,
             user_id: config.user_id,
+            org_id: config.org_id || null,
             maintenanceBy: config.maintenanceBy || 'internal',
             vendorName: config.vendorName || null,
             vendorContact: config.vendorContact || null,
@@ -157,6 +159,7 @@ export async function regenerateSchedules(config: {
     schedule_date: string;
     template_id?: string | null;
     user_id?: string;
+    org_id?: string | null;
     maintenanceBy?: string;
     vendorName?: string | null;
     vendorContact?: string | null;
@@ -187,6 +190,7 @@ export async function regenerateSchedules(config: {
         schedule_date: config.schedule_date,
         template_id: config.template_id,
         user_id: config.user_id,
+        org_id: config.org_id,
         maintenanceBy: config.maintenanceBy,
         vendorName: config.vendorName,
         vendorContact: config.vendorContact,
